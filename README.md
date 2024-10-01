@@ -1,4 +1,4 @@
-Here's the README with comprehensive details about your SvS-Bot-2:
+
 
 ```markdown
 # SvS-Bot-2
