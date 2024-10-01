@@ -1,0 +1,36 @@
+# Node modules
+node_modules
+
+# Credentials and environment files
+config/credentials.json
+.env
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional VS Code settings
+.vscode/
+
+# MacOS file (if using Mac)
+.DS_Store
+
+# Windows thumbnail cache files
+Thumbs.db
+
+# Package lock files (optional if you want to keep lock files consistent)
+package-lock.json
+yarn.lock
+
+# Build directories
+dist/
+build/
