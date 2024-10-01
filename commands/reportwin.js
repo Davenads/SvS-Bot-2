@@ -17,8 +17,7 @@ const sheets = google.sheets({
     ),
 });
 
-const SPREADSHEET_ID = '1Ay8YGTGk1vUSTpD2DteeWeUxXlTCLdtvB-uFKDWIYEU'; // Your spreadsheet ID
-const SHEET_NAME = 'Ladder Bot testing'; // Name of the tab within the Google Sheet
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const sheetId = 1574388856; // Numeric sheetId obtained from the URL
 
 module.exports = {
@@ -39,12 +38,10 @@ module.exports = {
         const challengedRank = interaction.options.getInteger('challenged_rank');
 
         try {
-            console.log('Executing reportwin command.');
-
             // Fetch data from the Google Sheet
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:I`,
+                range: `Ladder Bot testing!A2:I`,
             });
 
             const rows = result.data.values;
@@ -59,8 +56,6 @@ module.exports = {
             if (!challengerRow || !challengedRow) {
                 return interaction.reply({ content: 'Invalid ranks provided.', ephemeral: true });
             }
-
-            console.log(`Swapping data between challengerRank ${challengerRank} and challengedRank ${challengedRank}`);
 
             const challengerRowIndex = rows.findIndex(row => parseInt(row[0]) === challengerRank) + 2;
             const challengedRowIndex = rows.findIndex(row => parseInt(row[0]) === challengedRank) + 2;
@@ -78,32 +73,73 @@ module.exports = {
             updatedChallengedRow[6] = ''; // Clear cDate
             updatedChallengedRow[7] = ''; // Clear Opp#
 
-            // Create a batchUpdate request to update the rows
+            // Define color mappings
+            const specColorMap = {
+                'Vita': { red: 0.96, green: 0.80, blue: 0.69 }, // Tan color for Vita
+                'ES': { red: 0.78, green: 0.86, blue: 0.94 },  // Off-blue color for ES
+            };
+
+            const elementColorMap = {
+                'Fire': { red: 0.98, green: 0.59, blue: 0.51 }, // Red color for Fire
+                'Light': { red: 1.0, green: 0.93, blue: 0.69 }, // Yellow color for Light
+                'Cold': { red: 0.68, green: 0.85, blue: 0.90 }, // Blue color for Cold
+            };
+
+            const nameColumnColor = { red: 0.8, green: 0.94, blue: 0.75 }; // Light green color
+            const userInfoColumnColor = { red: 0.8, green: 0.9, blue: 0.98 }; // Light blue color
+
+            // Create a batchUpdate request to update the rows with cell values and color
             const requests = [
                 {
                     updateCells: {
                         range: {
-                            sheetId: sheetId, // Use the numeric sheetId here
-                            startRowIndex: challengerRowIndex - 1, // Google Sheets API is 0-indexed
+                            sheetId: sheetId,
+                            startRowIndex: challengerRowIndex - 1,
                             endRowIndex: challengerRowIndex,
-                            startColumnIndex: 1, // Start at column B (index 1)
-                            endColumnIndex: 9   // End at column I (index 9)
+                            startColumnIndex: 1, // Start at column B
+                            endColumnIndex: 9   // End at column I
                         },
-                        rows: [{ values: updatedChallengerRow.slice(1).map(cellValue => ({ userEnteredValue: { stringValue: cellValue } })) }],
-                        fields: 'userEnteredValue'
+                        rows: [{
+                            values: updatedChallengerRow.slice(1).map((cellValue, colIndex) => ({
+                                userEnteredValue: { stringValue: cellValue },
+                                userEnteredFormat: colIndex === 1 // Spec column
+                                    ? { backgroundColor: specColorMap[updatedChallengerRow[2]] }
+                                    : colIndex === 2 // Element column
+                                        ? { backgroundColor: elementColorMap[updatedChallengerRow[3]] }
+                                        : colIndex === 0 || colIndex >= 3 // Name and other light blue/green columns
+                                            ? {
+                                                backgroundColor: colIndex === 0 ? nameColumnColor : userInfoColumnColor,
+                                            }
+                                            : {}
+                            }))
+                        }],
+                        fields: 'userEnteredValue,userEnteredFormat.backgroundColor'
                     }
                 },
                 {
                     updateCells: {
                         range: {
-                            sheetId: sheetId, // Use the numeric sheetId here
+                            sheetId: sheetId,
                             startRowIndex: challengedRowIndex - 1,
                             endRowIndex: challengedRowIndex,
-                            startColumnIndex: 1, // Start at column B (index 1)
-                            endColumnIndex: 9   // End at column I (index 9)
+                            startColumnIndex: 1, // Start at column B
+                            endColumnIndex: 9   // End at column I
                         },
-                        rows: [{ values: updatedChallengedRow.slice(1).map(cellValue => ({ userEnteredValue: { stringValue: cellValue } })) }],
-                        fields: 'userEnteredValue'
+                        rows: [{
+                            values: updatedChallengedRow.slice(1).map((cellValue, colIndex) => ({
+                                userEnteredValue: { stringValue: cellValue },
+                                userEnteredFormat: colIndex === 1 // Spec column
+                                    ? { backgroundColor: specColorMap[updatedChallengedRow[2]] }
+                                    : colIndex === 2 // Element column
+                                        ? { backgroundColor: elementColorMap[updatedChallengedRow[3]] }
+                                        : colIndex === 0 || colIndex >= 3 // Name and other light blue/green columns
+                                            ? {
+                                                backgroundColor: colIndex === 0 ? nameColumnColor : userInfoColumnColor,
+                                            }
+                                            : {}
+                            }))
+                        }],
+                        fields: 'userEnteredValue,userEnteredFormat.backgroundColor'
                     }
                 }
             ];

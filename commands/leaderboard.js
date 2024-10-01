@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
@@ -7,7 +8,7 @@ const sheets = google.sheets({ version: 'v4', auth: new google.auth.JWT(
     credentials.client_email, null, credentials.private_key, ['https://www.googleapis.com/auth/spreadsheets']
 )});
 
-const SPREADSHEET_ID = '1Ay8YGTGk1vUSTpD2DteeWeUxXlTCLdtvB-uFKDWIYEU';
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = 'Ladder Bot Testing'; // Make sure this points to your current testing tab
 
 module.exports = {
@@ -17,21 +18,14 @@ module.exports = {
     
     async execute(interaction) {
         try {
-            console.log('Leaderboard command executed'); // Log when the command is triggered
-            console.log(`Interaction received from user: ${interaction.user.tag} (ID: ${interaction.user.id})`);
-            console.log('Attempting to fetch leaderboard data from Google Sheets...');
-
             // Fetch data from the Google Sheet
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
                 range: `${SHEET_NAME}!A2:H36`, // Adjust range as needed
             });
 
-            console.log('Data successfully fetched from Google Sheets:', result.data);
-
             const rows = result.data.values;
             if (!rows.length) {
-                console.warn('No data found in the specified range.');
                 return interaction.reply({ content: 'No data available on the leaderboard.', ephemeral: true });
             }
 
@@ -45,8 +39,6 @@ module.exports = {
 
             // Process rows into multiple embeds if necessary
             rows.forEach((row, index) => {
-                console.log(`Processing row ${index + 1}:`, row);
-                
                 const rank = row[0] || 'N/A';
                 const name = row[1] || 'Unknown';
                 const spec = row[2] || 'Unknown'; // Vita or ES
@@ -72,12 +64,8 @@ module.exports = {
                 }
             });
 
-            // Log the number of embeds created
-            console.log(`Total embeds created: ${embeds.length}`);
-
             // If only one embed is required
             if (embeds.length === 1) {
-                console.log('Sending single embed response.');
                 return await interaction.reply({ embeds: [embeds[0]] });
             }
 
@@ -96,7 +84,6 @@ module.exports = {
                     .setDisabled(embeds.length <= 1) // Disable if there's only one page
             );
 
-            console.log('Sending paginated embed with buttons...');
             const message = await interaction.reply({
                 embeds: [embeds[currentPage]],
                 components: [buttonRow],
@@ -108,8 +95,6 @@ module.exports = {
             });
 
             collector.on('collect', async (buttonInteraction) => {
-                console.log(`Button interaction received: ${buttonInteraction.customId}`);
-
                 if (buttonInteraction.customId === 'next') {
                     currentPage++;
                 } else if (buttonInteraction.customId === 'previous') {
@@ -136,13 +121,11 @@ module.exports = {
             });
 
             collector.on('end', () => {
-                console.log('Button collector ended. Disabling buttons...');
                 interaction.editReply({
                     components: [], // Remove buttons after the collector ends
                 });
             });
         } catch (error) {
-            console.error('Error fetching leaderboard data:', error);
             await interaction.reply({ content: 'There was an error retrieving the leaderboard data.', ephemeral: true });
         }
     },
