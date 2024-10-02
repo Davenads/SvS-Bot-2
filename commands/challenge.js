@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
 const { logError } = require('../logger'); // Import the logger
@@ -46,30 +46,24 @@ module.exports = {
             const challengerRow = rows.find(row => parseInt(row[0]) === challengerRank);
             const targetRow = rows.find(row => parseInt(row[0]) === targetRank);
 
-            // Log detailed info about the fetched rows
-            logError(`Challenger Row Details: ${JSON.stringify(challengerRow)}`);
-            logError(`Target Row Details: ${JSON.stringify(targetRow)}`);
+            // Element Emojis
+            const elementEmojiMap = {
+                'Fire': '🔥',
+                'Light': '⚡',
+                'Cold': '❄️'
+            };
 
-            // Log if rows couldn't be found
-            if (!challengerRow) {
-                logError(`Invalid challenger rank provided: ${challengerRank}`);
-                return interaction.reply({ content: 'Invalid ranks provided.', ephemeral: true });
-            }
-
-            if (!targetRow) {
-                logError(`Invalid target rank provided: ${targetRank}`);
+            if (!challengerRow || !targetRow) {
                 return interaction.reply({ content: 'Invalid ranks provided.', ephemeral: true });
             }
 
             // Validate that the person issuing the challenge is the one making the command
             if (challengerRow[8] !== userId.toString()) {  // Updated to check Column I (index 8)
-                logError(`User ID mismatch. Command issuer ID: ${userId}, Expected ID: ${challengerRow[8]}`);
                 return interaction.reply({ content: 'You can only initiate challenges for your own character.', ephemeral: true });
             }
 
             // Ensure both players are available
             if (challengerRow[5] !== 'Available' || targetRow[5] !== 'Available') {
-                logError(`One or both players are not available for a challenge. Challenger status: ${challengerRow[5]}, Target status: ${targetRow[5]}`);
                 return interaction.reply({ content: 'One or both players are not available for a challenge.', ephemeral: true });
             }
 
@@ -82,9 +76,6 @@ module.exports = {
                     maxReachableRank--; // Add one more allowable challenge range per vacation player
                 }
             }
-
-            // Logging the calculation process
-            logError(`Calculated max reachable rank for challenge: ${maxReachableRank}`);
 
             if (targetRank < maxReachableRank) {
                 return interaction.reply({ content: `You can only challenge up to 3 ranks ahead unless skipping vacation players.`, ephemeral: true });
@@ -99,10 +90,6 @@ module.exports = {
 
             const challengerUpdateRange = `${SHEET_NAME}!F${challengerRowIndex}:H${challengerRowIndex}`;
             const targetUpdateRange = `${SHEET_NAME}!F${targetRowIndex}:H${targetRowIndex}`;
-
-            // Log update ranges and values before sending the data to Google Sheets
-            logError(`Updating Challenger Row at Range: ${challengerUpdateRange} with Values: ["Challenge", "${challengeDate}", ${targetRank}]`);
-            logError(`Updating Target Row at Range: ${targetUpdateRange} with Values: ["Challenge", "${challengeDate}", ${challengerRank}]`);
 
             // Update Challenger Status and Challenge Date
             await sheets.spreadsheets.values.update({
@@ -120,7 +107,23 @@ module.exports = {
                 resource: { values: [['Challenge', challengeDate, challengerRank]] },
             });
 
-            await interaction.reply({ content: `Challenge initiated between rank #${challengerRank} (${challengerRow[1]}) and rank #${targetRank} (${targetRow[1]})!`, ephemeral: false });
+            // Create an Embed Message
+            const challengeEmbed = new EmbedBuilder()
+                .setColor(0x00AE86)
+                .setTitle('New Challenge Initiated!')
+                .addFields(
+                    { name: 'Challenger', value: `**Rank #${challengerRank}** (${challengerRow[1]}) ${elementEmojiMap[challengerRow[3]]}`, inline: true },
+                    { name: 'Challenged', value: `**Rank #${targetRank}** (${targetRow[1]}) ${elementEmojiMap[targetRow[3]]}`, inline: true },
+                    { name: 'Challenge Date', value: `${challengeDate}`, inline: false },
+                )
+                .setTimestamp()
+                .setFooter({ text: 'Good luck to both players!', iconURL: interaction.client.user.displayAvatarURL() });
+
+            // Send the Embed to the channel
+            await interaction.channel.send({ embeds: [challengeEmbed] });
+
+            return interaction.reply({ content: `Challenge initiated successfully!`, ephemeral: true });
+
         } catch (error) {
             logError(`Error during challenge execution: ${error.message}\nStack: ${error.stack}`);
             await interaction.reply({ content: 'There was an error initiating the challenge. Please try again.', ephemeral: true });

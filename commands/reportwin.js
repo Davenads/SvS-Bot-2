@@ -73,20 +73,20 @@ module.exports = {
             updatedChallengedRow[6] = ''; // Clear cDate
             updatedChallengedRow[7] = ''; // Clear Opp#
 
-            // Define color mappings
+            // Define color mappings (this can remain the same)
             const specColorMap = {
-                'Vita': { red: 0.96, green: 0.80, blue: 0.69 }, // Tan color for Vita
-                'ES': { red: 0.78, green: 0.86, blue: 0.94 },  // Off-blue color for ES
+                'Vita': { red: 0.96, green: 0.80, blue: 0.69 },
+                'ES': { red: 0.78, green: 0.86, blue: 0.94 },
             };
 
             const elementColorMap = {
-                'Fire': { red: 0.98, green: 0.59, blue: 0.51 }, // Red color for Fire
-                'Light': { red: 1.0, green: 0.93, blue: 0.69 }, // Yellow color for Light
-                'Cold': { red: 0.68, green: 0.85, blue: 0.90 }, // Blue color for Cold
+                'Fire': { red: 0.98, green: 0.59, blue: 0.51 },
+                'Light': { red: 1.0, green: 0.93, blue: 0.69 },
+                'Cold': { red: 0.68, green: 0.85, blue: 0.90 },
             };
 
-            const nameColumnColor = { red: 0.8, green: 0.94, blue: 0.75 }; // Light green color
-            const userInfoColumnColor = { red: 0.8, green: 0.9, blue: 0.98 }; // Light blue color
+            const nameColumnColor = { red: 0.8, green: 0.94, blue: 0.75 };
+            const userInfoColumnColor = { red: 0.8, green: 0.9, blue: 0.98 };
 
             // Create a batchUpdate request to update the rows with cell values and color
             const requests = [
@@ -96,17 +96,17 @@ module.exports = {
                             sheetId: sheetId,
                             startRowIndex: challengerRowIndex - 1,
                             endRowIndex: challengerRowIndex,
-                            startColumnIndex: 1, // Start at column B
-                            endColumnIndex: 9   // End at column I
+                            startColumnIndex: 1,
+                            endColumnIndex: 9
                         },
                         rows: [{
                             values: updatedChallengerRow.slice(1).map((cellValue, colIndex) => ({
                                 userEnteredValue: { stringValue: cellValue },
-                                userEnteredFormat: colIndex === 1 // Spec column
+                                userEnteredFormat: colIndex === 1 
                                     ? { backgroundColor: specColorMap[updatedChallengerRow[2]] }
-                                    : colIndex === 2 // Element column
+                                    : colIndex === 2 
                                         ? { backgroundColor: elementColorMap[updatedChallengerRow[3]] }
-                                        : colIndex === 0 || colIndex >= 3 // Name and other light blue/green columns
+                                        : colIndex === 0 || colIndex >= 3 
                                             ? {
                                                 backgroundColor: colIndex === 0 ? nameColumnColor : userInfoColumnColor,
                                             }
@@ -122,17 +122,17 @@ module.exports = {
                             sheetId: sheetId,
                             startRowIndex: challengedRowIndex - 1,
                             endRowIndex: challengedRowIndex,
-                            startColumnIndex: 1, // Start at column B
-                            endColumnIndex: 9   // End at column I
+                            startColumnIndex: 1,
+                            endColumnIndex: 9
                         },
                         rows: [{
                             values: updatedChallengedRow.slice(1).map((cellValue, colIndex) => ({
                                 userEnteredValue: { stringValue: cellValue },
-                                userEnteredFormat: colIndex === 1 // Spec column
+                                userEnteredFormat: colIndex === 1 
                                     ? { backgroundColor: specColorMap[updatedChallengedRow[2]] }
-                                    : colIndex === 2 // Element column
+                                    : colIndex === 2 
                                         ? { backgroundColor: elementColorMap[updatedChallengedRow[3]] }
-                                        : colIndex === 0 || colIndex >= 3 // Name and other light blue/green columns
+                                        : colIndex === 0 || colIndex >= 3 
                                             ? {
                                                 backgroundColor: colIndex === 0 ? nameColumnColor : userInfoColumnColor,
                                             }
@@ -152,10 +152,17 @@ module.exports = {
                 }
             });
 
-            return interaction.reply({ content: `Challenge result reported successfully! The ranks have been swapped between #${challengerRank} and #${challengedRank}.`, ephemeral: true });
+            // Public success message
+            await interaction.channel.send(`Challenge result reported successfully! The ranks have been swapped between #${challengerRank} and #${challengedRank}.`);
+
+            return interaction.reply({ content: `Challenge result reported successfully!`, ephemeral: true });
 
         } catch (error) {
             console.error('Error reporting match result:', error);
+
+            // Public error message
+            await interaction.channel.send('An error occurred while reporting the match result. Please try again later.');
+
             return interaction.reply({
                 content: 'An error occurred while reporting the match result. Please try again later.',
                 ephemeral: true
