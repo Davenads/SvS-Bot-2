@@ -33,9 +33,20 @@ module.exports = {
             let currentEmbed = new EmbedBuilder()
                 .setColor(0x00AE86) // Set color
                 .setTitle('🏆 SvS Ladder Leaderboard 🏆')
-                .setDescription('Current standings in the SvS Ladder with respective specs and elements.')
+                .setDescription('Current standings in the SvS Ladder.')
                 .setTimestamp()
                 .setFooter({ text: 'SvS Bot Leaderboard', iconURL: interaction.client.user.displayAvatarURL() });
+
+            // Emojis for Spec and Element
+            const specEmojiMap = {
+                Vita: '❤️',  // Vita Spec
+                ES: '🟠'    // ES Spec
+            };
+            const elementEmojiMap = {
+                Fire: '🔥',
+                Light: '⚡',
+                Cold: '❄️'
+            };
 
             // Process rows into multiple embeds if necessary
             rows.forEach((row, index) => {
@@ -44,12 +55,13 @@ module.exports = {
                 const spec = row[2] || 'Unknown'; // Vita or ES
                 const element = row[3] || 'Unknown'; // Fire, Light, or Cold
                 const status = row[5] || 'Available';
-                const emoji = spec === 'Vita' ? '💖' : '🟠';
-                const elementEmoji = element === 'Fire' ? '🔥' : element === 'Light' ? '⚡' : '❄️';
+
+                // Consolidating spec and element into one line next to the player's name
+                const specAndElement = `${specEmojiMap[spec] || ''}${elementEmojiMap[element] || ''}`;
 
                 currentEmbed.addFields({
-                    name: `#${rank} - ${name}`,
-                    value: `**Spec**: ${spec} ${emoji}\n**Element**: ${element} ${elementEmoji}\n**Status**: ${status}`,
+                    name: `#${rank} - ${name} ${specAndElement}`, // Player's name with spec and element emojis
+                    value: `Status: ${status}`,
                     inline: false
                 });
 
