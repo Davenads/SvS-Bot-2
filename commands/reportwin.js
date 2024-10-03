@@ -18,7 +18,7 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const sheetId = 1574388856; // Numeric sheetId obtained from the URL
+const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -38,10 +38,10 @@ module.exports = {
         const challengedRank = interaction.options.getInteger('challenged_rank');
 
         try {
-            // Fetch data from the Google Sheet
+            // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `Ladder Bot testing!A2:I`,
+                range: `SvS Ladder!A2:I`,  // Change to main tab 'SvS Ladder'
             });
 
             const rows = result.data.values;

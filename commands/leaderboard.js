@@ -9,7 +9,7 @@ const sheets = google.sheets({ version: 'v4', auth: new google.auth.JWT(
 )});
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_NAME = 'Ladder Bot Testing'; // Make sure this points to your current testing tab
+const SHEET_NAME = 'SvS Ladder'; // Make sure this points to your current testing tab
 
 module.exports = {
     data: new SlashCommandBuilder()
