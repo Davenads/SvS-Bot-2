@@ -41,7 +41,7 @@ module.exports = {
             // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:I`,  // Change to main tab 'SvS Ladder'
+                range: `SvS Ladder!A2:K`,  // Fetch columns A to K
             });
 
             const rows = result.data.values;
@@ -60,18 +60,22 @@ module.exports = {
             const challengerRowIndex = rows.findIndex(row => parseInt(row[0]) === challengerRank) + 2;
             const challengedRowIndex = rows.findIndex(row => parseInt(row[0]) === challengedRank) + 2;
 
-            // Prepare data for swapping, excluding the rank column (Column A)
+            // Preserve Notes (Column J) and Cooldown (Column K) and prepare other data for swapping, excluding the rank column (Column A)
             const updatedChallengerRow = [...challengedRow];
-            updatedChallengerRow[0] = challengerRow[0]; // Keep the original rank
+            updatedChallengerRow[0] = challengerRow[0]; // Keep the original rank (Column A)
             updatedChallengerRow[5] = 'Available'; // Set status to 'Available'
             updatedChallengerRow[6] = ''; // Clear cDate
             updatedChallengerRow[7] = ''; // Clear Opp#
+            updatedChallengerRow[9] = challengedRow[9]; // Preserve Notes (Column J)
+            updatedChallengerRow[10] = challengedRow[10]; // Preserve Cooldowns (Column K)
 
             const updatedChallengedRow = [...challengerRow];
-            updatedChallengedRow[0] = challengedRow[0]; // Keep the original rank
+            updatedChallengedRow[0] = challengedRow[0]; // Keep the original rank (Column A)
             updatedChallengedRow[5] = 'Available'; // Set status to 'Available'
             updatedChallengedRow[6] = ''; // Clear cDate
             updatedChallengedRow[7] = ''; // Clear Opp#
+            updatedChallengedRow[9] = challengerRow[9]; // Preserve Notes (Column J)
+            updatedChallengedRow[10] = challengerRow[10]; // Preserve Cooldowns (Column K)
 
             // Define color mappings (this can remain the same)
             const specColorMap = {
@@ -97,7 +101,7 @@ module.exports = {
                             startRowIndex: challengerRowIndex - 1,
                             endRowIndex: challengerRowIndex,
                             startColumnIndex: 1,
-                            endColumnIndex: 9
+                            endColumnIndex: 11  // Adjusted for columns B to K (Name to Cooldowns)
                         },
                         rows: [{
                             values: updatedChallengerRow.slice(1).map((cellValue, colIndex) => ({
@@ -113,7 +117,7 @@ module.exports = {
                                             : {}
                             }))
                         }],
-                        fields: 'userEnteredValue,userEnteredFormat.backgroundColor'
+                        fields: 'userEnteredValue, userEnteredFormat.backgroundColor'  // Corrected fields
                     }
                 },
                 {
@@ -123,7 +127,7 @@ module.exports = {
                             startRowIndex: challengedRowIndex - 1,
                             endRowIndex: challengedRowIndex,
                             startColumnIndex: 1,
-                            endColumnIndex: 9
+                            endColumnIndex: 11  // Adjusted for columns B to K (Name to Cooldowns)
                         },
                         rows: [{
                             values: updatedChallengedRow.slice(1).map((cellValue, colIndex) => ({
@@ -139,7 +143,7 @@ module.exports = {
                                             : {}
                             }))
                         }],
-                        fields: 'userEnteredValue,userEnteredFormat.backgroundColor'
+                        fields: 'userEnteredValue, userEnteredFormat.backgroundColor'  // Corrected fields
                     }
                 }
             ];
