@@ -40,6 +40,14 @@ module.exports = {
       const targetRank = interaction.options.getInteger('target_rank');
       const userId = interaction.user.id;
 
+      // Prevent challenging downward in the ladder
+      if (challengerRank <= targetRank) {
+        return interaction.reply({
+          content: `Nice try <@${userId}>, but you can't challenge downward in the ladder!`,
+          ephemeral: false
+        });
+      }
+
       // Fetch all data from the sheet dynamically
       const result = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
@@ -97,6 +105,17 @@ module.exports = {
         });
       }
 
+      // Format the challenge date in the shortened format
+      const challengeDate = new Date(interaction.createdTimestamp).toLocaleString('en-US', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true,
+        timeZone: 'America/New_York', // Adjust for your timezone
+        timeZoneName: 'short'
+      });
+
       // Update the status, challenge date, and opponent columns in Google Sheets for both players
       const challengerRowIndex =
         rows.findIndex(row => parseInt(row[0]) === challengerRank) + 2;
@@ -106,20 +125,20 @@ module.exports = {
       const challengerUpdateRange = `${SHEET_NAME}!F${challengerRowIndex}:H${challengerRowIndex}`;
       const targetUpdateRange = `${SHEET_NAME}!F${targetRowIndex}:H${targetRowIndex}`;
 
-      // Update Challenger Status
+      // Update Challenger Status, Challenge Date, and Opponent
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
         range: challengerUpdateRange,
         valueInputOption: 'USER_ENTERED',
-        resource: { values: [['Challenge', '', targetRank]] }
+        resource: { values: [['Challenge', challengeDate, targetRank]] }
       });
 
-      // Update Target Status
+      // Update Target Status, Challenge Date, and Opponent
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
         range: targetUpdateRange,
         valueInputOption: 'USER_ENTERED',
-        resource: { values: [['Challenge', '', challengerRank]] }
+        resource: { values: [['Challenge', challengeDate, challengerRank]] }
       });
 
       // Create an Embed Message with User Mentions

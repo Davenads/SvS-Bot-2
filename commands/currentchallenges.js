@@ -43,6 +43,9 @@ module.exports = {
                 return interaction.reply({ content: 'There are currently no active challenges.', ephemeral: true });
             }
 
+            // Track already processed pairs to avoid duplicates
+            const processedPairs = new Set();
+
             // Create an embed to display all current challenges
             const challengeEmbed = new EmbedBuilder()
                 .setColor(0x00AE86)
@@ -51,13 +54,23 @@ module.exports = {
                 .setTimestamp()
                 .setFooter({ text: 'Good luck to all challengers!', iconURL: interaction.client.user.displayAvatarURL() });
 
-            // Add each challenge to the embed
+            // Add each challenge to the embed, avoiding duplicates
             challenges.forEach(challenge => {
                 const challengerRank = challenge[0]; // Rank of challenger
                 const challengerName = challenge[1]; // Name of challenger
                 const challengerElement = challenge[3]; // Element of challenger
                 const challengedRank = challenge[7]; // Rank of the challenged
                 const challengeDate = challenge[6]; // Challenge date
+
+                const pairKey = `${challengerRank}-${challengedRank}`;
+                const reversePairKey = `${challengedRank}-${challengerRank}`;
+
+                // Skip if the reverse pair has already been processed
+                if (processedPairs.has(reversePairKey)) {
+                    return;
+                }
+
+                processedPairs.add(pairKey);
 
                 const challengedPlayer = rows.find(row => row[0] === challengedRank);
                 const challengedName = challengedPlayer ? challengedPlayer[1] : 'Unknown';
@@ -66,13 +79,14 @@ module.exports = {
                 // Add a field to the embed with details about the challenge
                 challengeEmbed.addFields({
                     name: `Challenge: Rank #${challengerRank} vs Rank #${challengedRank}`,
-                    value: `**${challengerName}** ${elementEmojiMap[challengerElement]} 🆚 **${challengedName}** ${elementEmojiMap[challengedElement]}\nChallenge Date: ${challengeDate}`,
+                    value: `**${challengerName}** ${elementEmojiMap[challengerElement]} 🆚 **${challengedName}** ${elementEmojiMap[challengedElement]}
+Challenge Date: ${challengeDate}`,
                     inline: false
                 });
             });
 
-            // Send the embed to the channel
-            await interaction.reply({ embeds: [challengeEmbed] });
+            // Send the embed privately to the user who invoked the command
+            await interaction.reply({ embeds: [challengeEmbed], ephemeral: true });
 
         } catch (error) {
             logError(`Error fetching current challenges: ${error.message}\nStack: ${error.stack}`);

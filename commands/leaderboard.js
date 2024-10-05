@@ -78,7 +78,7 @@ module.exports = {
 
             // If only one embed is required
             if (embeds.length === 1) {
-                return await interaction.reply({ embeds: [embeds[0]] });
+                return await interaction.reply({ embeds: [embeds[0]], ephemeral: true });
             }
 
             // Pagination logic with buttons
@@ -100,6 +100,7 @@ module.exports = {
                 embeds: [embeds[currentPage]],
                 components: [buttonRow],
                 fetchReply: true,
+                ephemeral: true, // Respond only to the user
             });
 
             const collector = message.createMessageComponentCollector({
