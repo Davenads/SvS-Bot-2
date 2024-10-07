@@ -69,7 +69,7 @@ module.exports = {
         const spec = interaction.options.getString('spec');
         const element = interaction.options.getString('element');
         const discUser = interaction.options.getString('disc_user');
-        const discUserId = interaction.options.getUser('disc_user')?.id || interaction.user.id;
+        const discUserId = interaction.user.id;
         const notes = interaction.options.getString('notes') || '';
 
         try {
@@ -80,8 +80,10 @@ module.exports = {
             });
 
             const rows = result.data.values;
-            const newRow = [
-                rows.length + 1, // Rank (new entry at the bottom)
+            // Calculate ladder length only once
+            const ladderLength = rows.filter(row => row[0] && !isNaN(parseInt(row[0]))).length;
+            const newCharacterRow = [
+                ladderLength + 1, // Rank (new entry at the bottom of the ladder)
                 characterName,   // Name
                 spec,            // Spec
                 element,         // Element
@@ -91,28 +93,16 @@ module.exports = {
                 '',              // Opp#
                 discUserId,      // Discord user ID
                 notes,           // Notes
-                ''               // Cooldown        // Discord username
-                'Available',     // Status
-                '',              // cDate
-                '',              // Opp#
-                discUserId,      // Discord user ID
-                notes,           // Notes
-                ''               // Cooldown        // Discord username
-                'Available',     // Status
-                '',              // cDate
-                '',              // Opp#
-                discUser,        // Discord user ID (using username here as placeholder)
-                notes,           // Notes
                 ''               // Cooldown
             ];
 
-            // Append the new row to the Google Sheet
+            // Append the new row to the Google Sheet at the correct ladder position
             await sheets.spreadsheets.values.append({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:K`,
+                range: `SvS Ladder!A${ladderLength + 2}:K`,
                 valueInputOption: 'RAW',
                 resource: {
-                    values: [newRow]
+                    values: [newCharacterRow]
                 }
             });
 
