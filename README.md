@@ -29,9 +29,15 @@ This command allows users to see who is currently in a challenge and keep track 
 Reports the results of a challenge.  
 Provide the ranks of the challenger and the challenged player, and the bot will automatically update the leaderboard based on the result.
 
+### `/register`
+
+Registers a new character to the ladder.  
+Provide the character name, spec (Vita or ES), element (Fire, Light, or Cold), Discord username, and optional notes.  
+This command requires the **@SvS Manager** role.
+
 ## Role Requirement
 
-All commands require users to have the **@SvS Dueler** role to interact with the bot.
+All commands require users to have the **@SvS Dueler** role to interact with the bot, except `/register` which requires the **@SvS Manager** role.
 
 ## Technology Stack
 
