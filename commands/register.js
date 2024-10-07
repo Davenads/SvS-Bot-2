@@ -2,7 +2,7 @@
 require('dotenv').config();
 
 // Import necessary modules
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
 
@@ -19,6 +19,18 @@ const sheets = google.sheets({
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
+
+// Define emoji icons for Spec and Element
+const specEmojis = {
+    'Vita': '❤️',
+    'ES': '🔵'
+};
+
+const elementEmojis = {
+    'Fire': '🔥',
+    'Light': '⚡',
+    'Cold': '❄️'
+};
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -53,7 +65,7 @@ module.exports = {
             option.setName('notes')
                 .setDescription('Optional notes for the character')
                 .setRequired(false)),
-    
+
     async execute(interaction) {
         // Check if the user has the '@SvS Manager' role
         const managerRole = interaction.guild.roles.cache.find(role => role.name === 'SvS Manager');
@@ -76,37 +88,119 @@ module.exports = {
             // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:K`,  // Fetch columns A to K
+                range: `SvS Ladder!A2:K`, // Fetch columns A to K
             });
 
             const rows = result.data.values;
-            // Calculate ladder length only once
-            const ladderLength = rows.filter(row => row[0] && !isNaN(parseInt(row[0]))).length;
+            // Find the first empty row based on the Name column (Column B)
+            let emptyRowIndex = rows.length + 2; // Default to appending at the end
+            for (let i = 0; i < rows.length; i++) {
+                if (!rows[i][1]) { // Check if Column B (Name) is empty
+                    emptyRowIndex = i + 2;
+                    break;
+                }
+            }
+
             const newCharacterRow = [
-                ladderLength + 1, // Rank (new entry at the bottom of the ladder)
-                characterName,   // Name
-                spec,            // Spec
-                element,         // Element
-                discUser,        // Discord username
-                'Available',     // Status
-                '',              // cDate
-                '',              // Opp#
-                discUserId,      // Discord user ID
-                notes,           // Notes
-                ''               // Cooldown
+                emptyRowIndex - 1, // Rank (new entry based on available position)
+                characterName, // Name
+                spec, // Spec
+                element, // Element
+                discUser, // Discord username
+                'Available', // Status
+                '', // cDate
+                '', // Opp#
+                discUserId, // Discord user ID
+                notes, // Notes
+                '' // Cooldown
             ];
 
-            // Append the new row to the Google Sheet at the correct ladder position
-            await sheets.spreadsheets.values.append({
+            // Create requests for copying formatting from an existing row
+            const copyRowIndex = 1; // Assuming row 2 (index 1) has the desired formatting for Spec, Element, and Status columns
+            const requests = [
+                {
+                    copyPaste: {
+                        source: {
+                            sheetId: sheetId,
+                            startRowIndex: copyRowIndex,
+                            endRowIndex: copyRowIndex + 1,
+                            startColumnIndex: 2,
+                            endColumnIndex: 6
+                        },
+                        destination: {
+                            sheetId: sheetId,
+                            startRowIndex: emptyRowIndex - 1,
+                            endRowIndex: emptyRowIndex,
+                            startColumnIndex: 2,
+                            endColumnIndex: 6
+                        },
+                        pasteType: 'PASTE_FORMAT'
+                    }
+                },
+                {
+                    copyPaste: {
+                        source: {
+                            sheetId: sheetId,
+                            startRowIndex: copyRowIndex,
+                            endRowIndex: copyRowIndex + 1,
+                            startColumnIndex: 5,
+                            endColumnIndex: 6
+                        },
+                        destination: {
+                            sheetId: sheetId,
+                            startRowIndex: emptyRowIndex - 1,
+                            endRowIndex: emptyRowIndex,
+                            startColumnIndex: 5,
+                            endColumnIndex: 6
+                        },
+                        pasteType: 'PASTE_DATA_VALIDATION'
+                    }
+                }
+            ];
+
+            // Execute batch update for copying formatting and data validation
+            await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A${ladderLength + 2}:K`,
+                resource: { requests }
+            });
+
+            // Update the Google Sheet with the new row at the correct position
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `SvS Ladder!A${emptyRowIndex}:K`,
                 valueInputOption: 'RAW',
                 resource: {
                     values: [newCharacterRow]
                 }
             });
 
-            return interaction.reply({ content: `Character '${characterName}' has been successfully registered to the ladder!`, ephemeral: true });
+            // Ensure the Status column (Column F) is set to 'Available' after copying data validation
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `SvS Ladder!F${emptyRowIndex}`,
+                valueInputOption: 'RAW',
+                resource: {
+                    values: [['Available']]
+                }
+            });
+
+            // Create an embed to display the registration details
+            const embed = new EmbedBuilder()
+                .setColor('#FFA500') // Aesthetic color for the embed
+                .setTitle('✨ New Character Registered! ✨')
+                .setThumbnail('https://example.com/character_image.png') // Add an appealing thumbnail image
+                .addFields(
+                    { name: '📝 **Character Name**', value: `**${characterName}**`, inline: false },
+                    { name: '👤 **Discord User**', value: `**${discUser}**`, inline: false },
+                    { name: '⚔️ **Spec & Element**', value: `${specEmojis[spec]} **${spec}** / ${elementEmojis[element]} **${element}**`, inline: false },
+                    { name: '📜 **Notes**', value: notes ? `**${notes}**` : 'None', inline: false }
+                )
+                .setImage('https://example.com/flair_banner.png') // Add a banner image for flair
+                .setFooter({ text: 'Successfully added to the SvS Ladder!', iconURL: 'https://example.com/footer_icon.png' })
+                .setTimestamp();
+
+            // Reply with the embed
+            return interaction.reply({ embeds: [embed] });
         } catch (error) {
             console.error('Error registering new character:', error);
             return interaction.reply({ content: 'An error occurred while registering the character. Please try again later.', ephemeral: true });
