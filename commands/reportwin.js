@@ -2,7 +2,7 @@
 require('dotenv').config();
 
 // Import necessary modules
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
 
@@ -10,9 +10,9 @@ const credentials = require('../config/credentials.json');
 const sheets = google.sheets({
     version: 'v4',
     auth: new google.auth.JWT(
-        credentials.client_email, 
-        null, 
-        credentials.private_key.replace(/\\n/g, '\n'), 
+        credentials.client_email,
+        null,
+        credentials.private_key.replace(/\n/g, '\n'),
         ['https://www.googleapis.com/auth/spreadsheets']
     ),
 });
@@ -20,22 +20,28 @@ const sheets = google.sheets({
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
 
+const elementEmojis = {
+    'Fire': '🔥',
+    'Light': '⚡',
+    'Cold': '❄️'
+};
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('reportwin')
         .setDescription('Report the results of a challenge')
         .addIntegerOption(option =>
-            option.setName('challenger_rank')
-                .setDescription('The rank number of the challenger')
+            option.setName('winner_rank')
+                .setDescription('The rank number of the winner')
                 .setRequired(true))
         .addIntegerOption(option =>
-            option.setName('challenged_rank')
-                .setDescription('The rank number of the challenged player')
+            option.setName('loser_rank')
+                .setDescription('The rank number of the loser')
                 .setRequired(true)),
     
     async execute(interaction) {
-        const challengerRank = interaction.options.getInteger('challenger_rank');
-        const challengedRank = interaction.options.getInteger('challenged_rank');
+        const winnerRank = interaction.options.getInteger('winner_rank');
+        const loserRank = interaction.options.getInteger('loser_rank');
 
         try {
             // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
@@ -49,101 +55,92 @@ module.exports = {
                 return interaction.reply({ content: 'No data available on the leaderboard.', ephemeral: true });
             }
 
-            // Find the challenger and challenged rows based on rank
-            const challengerRow = rows.find(row => parseInt(row[0]) === challengerRank);
-            const challengedRow = rows.find(row => parseInt(row[0]) === challengedRank);
+            // Find the winner and loser rows based on rank
+            const winnerRow = rows.find(row => parseInt(row[0]) === winnerRank);
+            const loserRow = rows.find(row => parseInt(row[0]) === loserRank);
 
-            if (!challengerRow || !challengedRow) {
+            if (!winnerRow || !loserRow) {
                 return interaction.reply({ content: 'Invalid ranks provided.', ephemeral: true });
             }
 
-            const challengerRowIndex = rows.findIndex(row => parseInt(row[0]) === challengerRank) + 2;
-            const challengedRowIndex = rows.findIndex(row => parseInt(row[0]) === challengedRank) + 2;
+            const winnerDiscordName = winnerRow[4]; // Discord name of the winner
+            const loserDiscordName = loserRow[4]; // Discord name of the loser
+            const winnerElement = winnerRow[3]; // Element of the winner
+            const loserElement = loserRow[3]; // Element of the loser
+            const winnerEmoji = elementEmojis[winnerElement] || '';
+            const loserEmoji = elementEmojis[loserElement] || '';
 
-            // Preserve Notes (Column J) and Cooldown (Column K) and prepare other data for swapping, excluding the rank column (Column A)
-            const updatedChallengerRow = [...challengedRow];
-            updatedChallengerRow[0] = challengerRow[0]; // Keep the original rank (Column A)
-            updatedChallengerRow[5] = 'Available'; // Set status to 'Available'
-            updatedChallengerRow[6] = ''; // Clear cDate
-            updatedChallengerRow[7] = ''; // Clear Opp#
-            updatedChallengerRow[9] = challengedRow[9]; // Preserve Notes (Column J)
-            updatedChallengerRow[10] = challengedRow[10]; // Preserve Cooldowns (Column K)
+            const winnerRowIndex = rows.findIndex(row => parseInt(row[0]) === winnerRank) + 2;
+            const loserRowIndex = rows.findIndex(row => parseInt(row[0]) === loserRank) + 2;
 
-            const updatedChallengedRow = [...challengerRow];
-            updatedChallengedRow[0] = challengedRow[0]; // Keep the original rank (Column A)
-            updatedChallengedRow[5] = 'Available'; // Set status to 'Available'
-            updatedChallengedRow[6] = ''; // Clear cDate
-            updatedChallengedRow[7] = ''; // Clear Opp#
-            updatedChallengedRow[9] = challengerRow[9]; // Preserve Notes (Column J)
-            updatedChallengedRow[10] = challengerRow[10]; // Preserve Cooldowns (Column K)
+            let updatedWinnerRow = [...winnerRow];
+            let updatedLoserRow = [...loserRow];
 
-            // Define color mappings (this can remain the same)
-            const specColorMap = {
-                'Vita': { red: 0.96, green: 0.80, blue: 0.69 },
-                'ES': { red: 0.78, green: 0.86, blue: 0.94 },
-            };
+            if (winnerRank > loserRank) {
+                // Swap rows if the winner has a worse rank (higher number)
+                updatedWinnerRow = [...loserRow];
+                updatedWinnerRow[0] = String(winnerRow[0]); // Keep the original rank (Column A)
+                updatedLoserRow = [...winnerRow];
+                updatedLoserRow[0] = String(loserRow[0]); // Keep the original rank (Column A)
+            } else {
+                updatedWinnerRow[0] = String(updatedWinnerRow[0]);
+                updatedLoserRow[0] = String(updatedLoserRow[0]);
+            }
 
-            const elementColorMap = {
-                'Fire': { red: 0.98, green: 0.59, blue: 0.51 },
-                'Light': { red: 1.0, green: 0.93, blue: 0.69 },
-                'Cold': { red: 0.68, green: 0.85, blue: 0.90 },
-            };
+            // Set status to 'Available' and clear challenge-specific columns
+            updatedWinnerRow[5] = 'Available'; // Set status to 'Available'
+            updatedWinnerRow[6] = ''; // Clear cDate
+            updatedWinnerRow[7] = ''; // Clear Opp#
+            updatedLoserRow[5] = 'Available'; // Set status to 'Available'
+            updatedLoserRow[6] = ''; // Clear cDate
+            updatedLoserRow[7] = ''; // Clear Opp#
 
-            const nameColumnColor = { red: 0.8, green: 0.94, blue: 0.75 };
-            const userInfoColumnColor = { red: 0.8, green: 0.9, blue: 0.98 };
+            // Preserve Notes (Column J) and Cooldown (Column K)
+            updatedWinnerRow[9] = winnerRow[9]; // Preserve Notes (Column J)
+            updatedWinnerRow[10] = winnerRow[10]; // Preserve Cooldown (Column K)
+            updatedLoserRow[9] = loserRow[9]; // Preserve Notes (Column J)
+            updatedLoserRow[10] = loserRow[10]; // Preserve Cooldown (Column K)
 
-            // Create a batchUpdate request to update the rows with cell values and color
+            // Create a batchUpdate request to update the rows with new values
             const requests = [
                 {
                     updateCells: {
                         range: {
                             sheetId: sheetId,
-                            startRowIndex: challengerRowIndex - 1,
-                            endRowIndex: challengerRowIndex,
-                            startColumnIndex: 1,
-                            endColumnIndex: 11  // Adjusted for columns B to K (Name to Cooldowns)
+                            startRowIndex: winnerRowIndex - 1,
+                            endRowIndex: winnerRowIndex,
+                            startColumnIndex: 0,
+                            endColumnIndex: 11  // Columns A to K
                         },
-                        rows: [{
-                            values: updatedChallengerRow.slice(1).map((cellValue, colIndex) => ({
-                                userEnteredValue: { stringValue: cellValue },
-                                userEnteredFormat: colIndex === 1 
-                                    ? { backgroundColor: specColorMap[updatedChallengerRow[2]] }
-                                    : colIndex === 2 
-                                        ? { backgroundColor: elementColorMap[updatedChallengerRow[3]] }
-                                        : colIndex === 0 || colIndex >= 3 
-                                            ? {
-                                                backgroundColor: colIndex === 0 ? nameColumnColor : userInfoColumnColor,
-                                            }
-                                            : {}
-                            }))
-                        }],
-                        fields: 'userEnteredValue, userEnteredFormat.backgroundColor'  // Corrected fields
+                        rows: [
+                            {
+                                values: updatedWinnerRow.map((cellValue, index) => ({
+                                    userEnteredValue: { stringValue: cellValue },
+                                    userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {}
+                                }))
+                            }
+                        ],
+                        fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
                     }
                 },
                 {
                     updateCells: {
                         range: {
                             sheetId: sheetId,
-                            startRowIndex: challengedRowIndex - 1,
-                            endRowIndex: challengedRowIndex,
-                            startColumnIndex: 1,
-                            endColumnIndex: 11  // Adjusted for columns B to K (Name to Cooldowns)
+                            startRowIndex: loserRowIndex - 1,
+                            endRowIndex: loserRowIndex,
+                            startColumnIndex: 0,
+                            endColumnIndex: 11  // Columns A to K
                         },
-                        rows: [{
-                            values: updatedChallengedRow.slice(1).map((cellValue, colIndex) => ({
-                                userEnteredValue: { stringValue: cellValue },
-                                userEnteredFormat: colIndex === 1 
-                                    ? { backgroundColor: specColorMap[updatedChallengedRow[2]] }
-                                    : colIndex === 2 
-                                        ? { backgroundColor: elementColorMap[updatedChallengedRow[3]] }
-                                        : colIndex === 0 || colIndex >= 3 
-                                            ? {
-                                                backgroundColor: colIndex === 0 ? nameColumnColor : userInfoColumnColor,
-                                            }
-                                            : {}
-                            }))
-                        }],
-                        fields: 'userEnteredValue, userEnteredFormat.backgroundColor'  // Corrected fields
+                        rows: [
+                            {
+                                values: updatedLoserRow.map((cellValue, index) => ({
+                                    userEnteredValue: { stringValue: cellValue },
+                                    userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {}
+                                }))
+                            }
+                        ],
+                        fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
                     }
                 }
             ];
@@ -156,8 +153,22 @@ module.exports = {
                 }
             });
 
-            // Public success message
-            await interaction.channel.send(`Challenge result reported successfully! The ranks have been swapped between #${challengerRank} and #${challengedRank}.`);
+            // Create an embed message to announce the result
+            const embed = new EmbedBuilder()
+                .setTitle('🔥 SvS Challenge Result Reported ⚔️')
+                .setDescription(`The challenge result has been successfully reported!
+
+**Winner Rank:** #${winnerRank} (${winnerDiscordName}) ${winnerEmoji}
+**Loser Rank:** #${loserRank} (${loserDiscordName}) ${loserEmoji}
+
+${winnerRank > loserRank ? '🏆 The ranks have been swapped between the winner and loser.' : '🎉 No rank swap was needed.'}`)
+                .setColor(0xFFA500)
+                .setThumbnail('https://example.com/svs_logo.png') // Example URL for SvS flair
+                .setFooter({ text: 'SvS Ladder Bot - Stay Fierce!' })
+                .setTimestamp();
+
+            // Send the embed message
+            await interaction.channel.send({ embeds: [embed] });
 
             return interaction.reply({ content: `Challenge result reported successfully!`, ephemeral: true });
 
