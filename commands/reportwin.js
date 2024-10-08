@@ -2,7 +2,7 @@
 require('dotenv').config();
 
 // Import necessary modules
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
 
@@ -42,6 +42,7 @@ module.exports = {
     async execute(interaction) {
         const winnerRank = interaction.options.getInteger('winner_rank');
         const loserRank = interaction.options.getInteger('loser_rank');
+        const userId = interaction.user.id;
 
         try {
             // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
@@ -61,6 +62,14 @@ module.exports = {
 
             if (!winnerRow || !loserRow) {
                 return interaction.reply({ content: 'Invalid ranks provided.', ephemeral: true });
+            }
+
+            const winnerDiscordId = winnerRow[8]; // Discord user ID of the winner
+            const loserDiscordId = loserRow[8]; // Discord user ID of the loser
+
+            // Check if the user is allowed to execute this command
+            if (userId !== winnerDiscordId && userId !== loserDiscordId && !interaction.member.roles.cache.some(role => role.name === 'SvS Manager')) {
+                return interaction.reply({ content: 'You do not have permission to report this challenge result.', ephemeral: true });
             }
 
             const winnerDiscordName = winnerRow[4]; // Discord name of the winner
