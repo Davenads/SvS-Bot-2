@@ -89,11 +89,22 @@ module.exports = {
                 // Swap rows if the winner has a worse rank (higher number)
                 updatedWinnerRow = [...loserRow];
                 updatedWinnerRow[0] = String(winnerRow[0]); // Keep the original rank (Column A)
+                
                 updatedLoserRow = [...winnerRow];
                 updatedLoserRow[0] = String(loserRow[0]); // Keep the original rank (Column A)
+
+                // Swap Notes (Column J) and Cooldown (Column K)
+                [updatedWinnerRow[9], updatedLoserRow[9]] = [loserRow[9], winnerRow[9]]; // Swap Notes
+                [updatedWinnerRow[10], updatedLoserRow[10]] = [loserRow[10], winnerRow[10]]; // Swap Cooldown
             } else {
                 updatedWinnerRow[0] = String(updatedWinnerRow[0]);
                 updatedLoserRow[0] = String(updatedLoserRow[0]);
+                
+                // Ensure Notes and Cooldown remain consistent if no swap is needed
+                updatedWinnerRow[9] = winnerRow[9];
+                updatedWinnerRow[10] = winnerRow[10];
+                updatedLoserRow[9] = loserRow[9];
+                updatedLoserRow[10] = loserRow[10];
             }
 
             // Set status to 'Available' and clear challenge-specific columns
@@ -103,12 +114,6 @@ module.exports = {
             updatedLoserRow[5] = 'Available'; // Set status to 'Available'
             updatedLoserRow[6] = ''; // Clear cDate
             updatedLoserRow[7] = ''; // Clear Opp#
-
-            // Preserve Notes (Column J) and Cooldown (Column K)
-            updatedWinnerRow[9] = winnerRow[9]; // Preserve Notes (Column J)
-            updatedWinnerRow[10] = winnerRow[10]; // Preserve Cooldown (Column K)
-            updatedLoserRow[9] = loserRow[9]; // Preserve Notes (Column J)
-            updatedLoserRow[10] = loserRow[10]; // Preserve Cooldown (Column K)
 
             // Create a batchUpdate request to update the rows with new values
             const requests = [

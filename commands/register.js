@@ -155,10 +155,52 @@ module.exports = {
                         },
                         pasteType: 'PASTE_DATA_VALIDATION'
                     }
+                },
+                {
+                    updateCells: {
+                        range: {
+                            sheetId: sheetId,
+                            startRowIndex: emptyRowIndex - 1,
+                            endRowIndex: emptyRowIndex,
+                            startColumnIndex: 3, // Element column (D)
+                            endColumnIndex: 4
+                        },
+                        rows: [{
+                            values: [{
+                                userEnteredFormat: {
+                                    backgroundColor: element === 'Cold' ? { red: 0.5, green: 0.635, blue: 1 } :
+                                                    element === 'Fire' ? { red: 0.976, green: 0.588, blue: 0.51 } :
+                                                    { red: 1, green: 0.929, blue: 0.686 }
+                                }
+                            }]
+                        }],
+                        fields: 'userEnteredFormat.backgroundColor'
+                    }
+                },
+                {
+                    updateCells: {
+                        range: {
+                            sheetId: sheetId,
+                            startRowIndex: emptyRowIndex - 1,
+                            endRowIndex: emptyRowIndex,
+                            startColumnIndex: 1, // Name column (B)
+                            endColumnIndex: 2
+                        },
+                        rows: [{
+                            values: [{
+                                userEnteredFormat: {
+                                    textFormat: {
+                                        bold: true
+                                    }
+                                }
+                            }]
+                        }],
+                        fields: 'userEnteredFormat.textFormat.bold'
+                    }
                 }
             ];
 
-            // Execute batch update for copying formatting and data validation
+            // Execute batch update for copying formatting, data validation, and custom styling
             await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: SPREADSHEET_ID,
                 resource: { requests }
