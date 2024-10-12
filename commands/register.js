@@ -60,11 +60,37 @@ module.exports = {
         .addStringOption(option =>
             option.setName('disc_user')
                 .setDescription('The Discord username of the character owner')
-                .setRequired(true))
+                .setRequired(true)
+                .setAutocomplete(true)) // Enable dynamic autocomplete for Discord username
         .addStringOption(option =>
             option.setName('notes')
                 .setDescription('Optional notes for the character')
                 .setRequired(false)),
+
+    async autocomplete(interaction) {
+        const focusedOption = interaction.options.getFocused(true);
+        if (focusedOption.name === 'disc_user') {
+            try {
+                // Fetch all members with the 'SvS Dueler' role
+                const guild = interaction.guild;
+                const duelerRole = guild.roles.cache.find(role => role.name === 'SvS Dueler');
+                if (!duelerRole) return interaction.respond([]);
+
+                const members = await guild.members.fetch();
+                const eligibleMembers = members.filter(member => member.roles.cache.has(duelerRole.id));
+
+                const choices = eligibleMembers.map(member => member.user.username);
+                const filtered = choices.filter(choice => choice.toLowerCase().includes(focusedOption.value.toLowerCase())).slice(0, 25); // Limit choices to 25
+
+                await interaction.respond(
+                    filtered.map(choice => ({ name: choice, value: choice }))
+                );
+            } catch (error) {
+                console.error('Error fetching autocomplete options:', error);
+                await interaction.respond([]);
+            }
+        }
+    },
 
     async execute(interaction) {
         // Check if the user has the '@SvS Manager' role
