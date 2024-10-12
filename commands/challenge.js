@@ -39,6 +39,7 @@ module.exports = {
       const challengerRank = interaction.options.getInteger('challenger_rank');
       const targetRank = interaction.options.getInteger('target_rank');
       const userId = interaction.user.id;
+      const memberRoles = interaction.member.roles.cache;
 
       // Prevent challenging downward in the ladder
       if (challengerRank <= targetRank) {
@@ -89,10 +90,10 @@ module.exports = {
       }
 
       // Validate that the person issuing the challenge is the one making the command
-      if (challengerRow[8] !== userId.toString()) {
-        // Updated to check Column I (index 8)
+      if (challengerRow[8] !== userId.toString() && !memberRoles.some(role => role.name === 'SvS Manager')) {
+        // Updated to check Column I (index 8) and check for '@SvS Manager' role
         return interaction.reply({
-          content: 'You can only initiate challenges for your own character.',
+          content: 'You can only initiate challenges for your own character, unless you have the @SvS Manager role.',
           ephemeral: true
         });
       }
