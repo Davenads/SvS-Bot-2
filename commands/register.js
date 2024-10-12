@@ -107,8 +107,12 @@ module.exports = {
         const spec = interaction.options.getString('spec');
         const element = interaction.options.getString('element');
         const discUser = interaction.options.getString('disc_user');
-        const discUserId = interaction.user.id;
+        const discUserId = interaction.guild.members.cache.find(member => member.user.username === discUser)?.id;
         const notes = interaction.options.getString('notes') || '';
+
+        if (!discUserId) {
+            return interaction.reply({ content: 'Could not find the specified Discord user.', ephemeral: true });
+        }
 
         try {
             // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
