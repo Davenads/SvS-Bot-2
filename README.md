@@ -1,83 +1,90 @@
 # SvS-Bot-2
 
-A Discord bot for managing an SvS leaderboard using Google Sheets as a database. Features rank challenges, status updates, and modular command handling.
+![SvS League Banner](assets/SvS_GeneralPoster5.png)
+
+SvS-Bot-2 is a Discord bot for managing PvP duel leaderboards in the "SvS" community, using Google Sheets as its database.
 
 ## Features
 
-- **Leaderboard Management**: Track player ranks, specs (Vita or ES), elements (Fire, Light, Cold), and challenge statuses.
-- **Challenge System**: Initiate challenges between players and update the leaderboard based on challenge results.
+- **Leaderboard System**: View and challenge others on the leaderboard.
+- **Game Management**: Register for events and report match outcomes.
+- **Role-Based Commands**: Commands are restricted based on assigned roles.
 
-## Slash Commands
+## Prerequisites
 
-### `/leaderboard`
+- Node.js (latest LTS version)
+- Google Cloud project with Google Sheets API access
+- Discord bot token
 
-Displays the full SvS leaderboard with player rankings, specs (Vita or ES), and elements (Fire, Light, Cold).  
-Keep track of the current standings and see how players rank in the ladder.
+## Project Structure
 
-### `/challenge`
+```
+SvS-Bot-2/
+|-- commands/                 # Command files (challenge, leaderboard, etc.)
+|-- config/                   # Google Sheets API credentials
+|-- handlers/                 # Command handler logic
+|-- .gitignore                # Ignoring sensitive/unnecessary files
+|-- clear-commands.js         # Clear registered bot commands
+|-- deploy-commands.js        # Deploy commands to Discord
+|-- errorlog.js               # Log errors
+|-- googleSheetTest.js        # Google Sheets integration test
+|-- index.js                  # Main bot entry point
+|-- logger.js                 # Logging module
+|-- package.json              # Project dependencies and scripts
+|-- README.md                 # Project documentation
+```
 
-Initiates a challenge between two players on the leaderboard.  
-Provide the challenger’s rank and the target’s rank. The bot will update both players’ statuses and handle the challenge process.
+## Setup
 
-### `/currentchallenges`
-
-Lists all active challenges in the SvS Ladder.  
-This command allows users to see who is currently in a challenge and keep track of ongoing matches.
-
-### `/reportwin`
-
-Reports the results of a challenge.  
-Provide the ranks of the challenger and the challenged player, and the bot will automatically update the leaderboard based on the result.
-
-### `/register`
-
-Registers a new character to the ladder.  
-Provide the character name, spec (Vita or ES), element (Fire, Light, or Cold), Discord username, and optional notes.  
-This command requires the **@SvS Manager** role.
-
-## Role Requirement
-
-All commands require users to have the **@SvS Dueler** role to interact with the bot, except `/register` which requires the **@SvS Manager** role.
-
-## Technology Stack
-
-- **Discord.js**: For Discord interaction handling.
-- **Google Sheets API**: For managing the SvS leaderboard data.
-
-## Installation
-
-1. Clone the repository:
+1. **Clone the Repository**
    ```sh
-   git clone https://github.com/Davenads/SvS-Bot-2.git
+   git clone https://github.com/yourusername/SvS-Bot-2.git
    cd SvS-Bot-2
    ```
-
-2. Install dependencies:
+2. **Install Dependencies**
    ```sh
    npm install
    ```
-
-3. Set up your environment variables in a `.env` file:
-   ```sh
-   BOT_TOKEN=your-discord-bot-token
-   GOOGLE_CLIENT_EMAIL=your-google-client-email
-   GOOGLE_PRIVATE_KEY=your-google-private-key
-   SHEET_ID=your-google-sheet-id
+3. **Environment Variables** Create a `.env` file in the root directory:
    ```
-
-4. Run the bot:
-   ```sh
-   node index.js
+   DISCORD_TOKEN="your_discord_bot_token_here"
+   GOOGLE_CLIENT_EMAIL="your_google_client_email_here"
+   GOOGLE_PRIVATE_KEY="your_google_private_key_here"
+   SHEET_ID="your_google_sheet_id_here"
    ```
+4. **Google Sheets API**
+   - Obtain `credentials.json` from Google Cloud Console and place it in `config/`.
+   - Share the Google Sheet with the client email.
 
-## Dependencies
+## Running the Bot
 
-- `discord.js` ^14.16.3
-- `dotenv` ^16.4.5
-- `google-spreadsheet` ^4.1.4
-- `googleapis` ^144.0.0
-- `@google-cloud/local-auth` ^3.0.1
+- **Start the Bot**
+  ```sh
+  node index.js
+  ```
+- **Deploy Commands**
+  ```sh
+  node deploy-commands.js
+  ```
+
+## Commands
+
+- `/challenge` - Initiate a challenge.
+- `/currentchallenges` - Display ongoing challenges.
+- `/leaderboard` - Show leaderboard.
+- `/nullchallenge` - Nullify a challenge (moderators only).
+- `/register` - Register to the leaderboard.
+- `/reportwin` - Report duel results.
+
+## Roles
+
+- **@SvS Dueler** - Required for most commands.
+- **@SvS Manager** - Required for moderator commands.
+
+## Contribution
+
+- Fork the repository, create a new branch, and submit a pull request.
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License. See `LICENSE` for details.
