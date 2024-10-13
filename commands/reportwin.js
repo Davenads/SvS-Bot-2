@@ -26,6 +26,12 @@ const elementEmojis = {
     'Cold': '❄️'
 };
 
+const elementColors = {
+    'Fire': { red: 0.976, green: 0.588, blue: 0.510 }, // #f99682
+    'Light': { red: 1, green: 0.925, blue: 0.682 },   // #ffecae
+    'Cold': { red: 0.498, green: 0.631, blue: 1 }     // #7fa1ff
+};
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('reportwin')
@@ -130,7 +136,7 @@ module.exports = {
                             {
                                 values: updatedWinnerRow.map((cellValue, index) => ({
                                     userEnteredValue: { stringValue: cellValue },
-                                    userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {}
+                                    userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {} // Ensure right alignment for Column A
                                 }))
                             }
                         ],
@@ -150,7 +156,7 @@ module.exports = {
                             {
                                 values: updatedLoserRow.map((cellValue, index) => ({
                                     userEnteredValue: { stringValue: cellValue },
-                                    userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {}
+                                    userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {} // Ensure right alignment for Column A
                                 }))
                             }
                         ],
@@ -159,11 +165,69 @@ module.exports = {
                 }
             ];
 
-            // Execute the batchUpdate request
+            // Execute the batchUpdate request to update rows
             await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: SPREADSHEET_ID,
                 resource: {
                     requests
+                }
+            });
+
+            // Manually assign colors to the element column after the swap
+            const elementUpdateRequests = [
+                {
+                    updateCells: {
+                        range: {
+                            sheetId: sheetId,
+                            startRowIndex: winnerRowIndex - 1,
+                            endRowIndex: winnerRowIndex,
+                            startColumnIndex: 3, // Column D (Element)
+                            endColumnIndex: 4
+                        },
+                        rows: [
+                            {
+                                values: [
+                                    {
+                                        userEnteredFormat: {
+                                            backgroundColor: elementColors[updatedWinnerRow[3]]
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        fields: 'userEnteredFormat.backgroundColor'
+                    }
+                },
+                {
+                    updateCells: {
+                        range: {
+                            sheetId: sheetId,
+                            startRowIndex: loserRowIndex - 1,
+                            endRowIndex: loserRowIndex,
+                            startColumnIndex: 3, // Column D (Element)
+                            endColumnIndex: 4
+                        },
+                        rows: [
+                            {
+                                values: [
+                                    {
+                                        userEnteredFormat: {
+                                            backgroundColor: elementColors[updatedLoserRow[3]]
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        fields: 'userEnteredFormat.backgroundColor'
+                    }
+                }
+            ];
+
+            // Execute the batchUpdate request to update element colors
+            await sheets.spreadsheets.batchUpdate({
+                spreadsheetId: SPREADSHEET_ID,
+                resource: {
+                    requests: elementUpdateRequests
                 }
             });
 
