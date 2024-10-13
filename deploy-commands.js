@@ -18,12 +18,28 @@ const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
     try {
         console.log('Started refreshing application (/) commands.');
 
-        await rest.put(
+        // Fetch current commands
+        const currentCommands = await rest.get(
             Routes.applicationCommands(process.env.CLIENT_ID),
-            { body: commands },
         );
 
-        console.log('Successfully reloaded application (/) commands.');
+        const currentCommandNames = currentCommands.map(cmd => cmd.name);
+        const newCommandNames = commands.map(cmd => cmd.name);
+
+        const commandsToUpdate = commands.filter(cmd => {
+            const existingCommand = currentCommands.find(currentCmd => currentCmd.name === cmd.name);
+            return !existingCommand || JSON.stringify(existingCommand.options) !== JSON.stringify(cmd.options);
+        });
+
+        if (commandsToUpdate.length > 0) {
+            await rest.put(
+                Routes.applicationCommands(process.env.CLIENT_ID),
+                { body: commandsToUpdate }
+            );
+            console.log(`Successfully updated ${commandsToUpdate.length} application (/) commands.`);
+        } else {
+            console.log('No changes detected in commands. Skipping update.');
+        }
     } catch (error) {
         console.error('Error refreshing commands:', error);
     }
