@@ -21,12 +21,18 @@ module.exports = {
             // Fetch data from the Google Sheet
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:H36`, // Adjust range as needed
+                range: `${SHEET_NAME}!A2:H`, // Adjust range to cover all rows dynamically
             });
 
             const rows = result.data.values;
             if (!rows.length) {
                 return interaction.reply({ content: 'No data available on the leaderboard.', ephemeral: true });
+            }
+
+            const validRows = rows.filter(row => row[0] && row[1]); // Filter out rows with missing rank or name
+
+            if (!validRows.length) {
+                return interaction.reply({ content: 'No valid data available on the leaderboard.', ephemeral: true });
             }
 
             const embeds = [];
@@ -49,7 +55,7 @@ module.exports = {
             };
 
             // Process rows into multiple embeds if necessary
-            rows.forEach((row, index) => {
+            validRows.forEach((row, index) => {
                 const rank = row[0] || 'N/A';
                 const name = row[1] || 'Unknown';
                 const spec = row[2] || 'Unknown'; // Vita or ES
@@ -65,8 +71,8 @@ module.exports = {
                     inline: false
                 });
 
-                // If the current embed has reached 25 fields, push it to the array and create a new embed
-                if ((index + 1) % 10 === 0 || index === rows.length - 1) {
+                // If the current embed has reached 15 fields, push it to the array and create a new embed
+                if ((index + 1) % 10 === 0 || index === validRows.length - 1) {
                     embeds.push(currentEmbed);
                     currentEmbed = new EmbedBuilder()
                         .setColor(0x00AE86)
@@ -85,6 +91,11 @@ module.exports = {
             let currentPage = 0;
             const buttonRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
+                    .setCustomId('first')
+                    .setLabel('First')
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(true), // Initially disable the 'First' button
+                new ButtonBuilder()
                     .setCustomId('previous')
                     .setLabel('Previous')
                     .setStyle(ButtonStyle.Primary)
@@ -92,6 +103,11 @@ module.exports = {
                 new ButtonBuilder()
                     .setCustomId('next')
                     .setLabel('Next')
+                    .setStyle(ButtonStyle.Primary)
+                    .setDisabled(embeds.length <= 1), // Disable if there's only one page
+                new ButtonBuilder()
+                    .setCustomId('last')
+                    .setLabel('Last')
                     .setStyle(ButtonStyle.Primary)
                     .setDisabled(embeds.length <= 1) // Disable if there's only one page
             );
@@ -112,12 +128,21 @@ module.exports = {
                     currentPage++;
                 } else if (buttonInteraction.customId === 'previous') {
                     currentPage--;
+                } else if (buttonInteraction.customId === 'first') {
+                    currentPage = 0;
+                } else if (buttonInteraction.customId === 'last') {
+                    currentPage = embeds.length - 1;
                 }
 
                 await buttonInteraction.update({
                     embeds: [embeds[currentPage]],
                     components: [
                         new ActionRowBuilder().addComponents(
+                            new ButtonBuilder()
+                                .setCustomId('first')
+                                .setLabel('First')
+                                .setStyle(ButtonStyle.Primary)
+                                .setDisabled(currentPage === 0),
                             new ButtonBuilder()
                                 .setCustomId('previous')
                                 .setLabel('Previous')
@@ -126,6 +151,11 @@ module.exports = {
                             new ButtonBuilder()
                                 .setCustomId('next')
                                 .setLabel('Next')
+                                .setStyle(ButtonStyle.Primary)
+                                .setDisabled(currentPage === embeds.length - 1),
+                            new ButtonBuilder()
+                                .setCustomId('last')
+                                .setLabel('Last')
                                 .setStyle(ButtonStyle.Primary)
                                 .setDisabled(currentPage === embeds.length - 1)
                         ),
