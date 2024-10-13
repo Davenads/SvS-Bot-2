@@ -93,10 +93,12 @@ module.exports = {
     },
 
     async execute(interaction) {
+        await interaction.deferReply({ ephemeral: true }); // Defer the reply to prevent timeout issues
+
         // Check if the user has the '@SvS Manager' role
         const managerRole = interaction.guild.roles.cache.find(role => role.name === 'SvS Manager');
         if (!managerRole || !interaction.member.roles.cache.has(managerRole.id)) {
-            return interaction.reply({
+            return interaction.editReply({
                 content: 'You do not have the required @SvS Manager role to use this command.',
                 ephemeral: true
             });
@@ -111,7 +113,7 @@ module.exports = {
         const notes = interaction.options.getString('notes') || '';
 
         if (!discUserId) {
-            return interaction.reply({ content: 'Could not find the specified Discord user.', ephemeral: true });
+            return interaction.editReply({ content: 'Could not find the specified Discord user.', ephemeral: true });
         }
 
         try {
@@ -272,10 +274,10 @@ module.exports = {
                 .setTimestamp();
 
             // Reply with the embed
-            return interaction.reply({ embeds: [embed] });
+            return interaction.editReply({ embeds: [embed] });
         } catch (error) {
             console.error('Error registering new character:', error);
-            return interaction.reply({ content: 'An error occurred while registering the character. Please try again later.', ephemeral: true });
+            return interaction.editReply({ content: 'An error occurred while registering the character. Please try again later.', ephemeral: true });
         }
     },
 };
