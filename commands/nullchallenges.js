@@ -103,7 +103,7 @@ module.exports = {
                 // Create an embed message to announce the result
                 const embed = new EmbedBuilder()
                     .setTitle('🛡️ Nullified Old Challenges 🛡️')
-                    .setDescription(`✨ Successfully nullified challenge pairs older than 3 days: **${Math.floor(nullifiedPairs / 2)}** ! ✨`)
+                    .setDescription(`✨ Success! Nullified challenge pairs older than 3 days: **${Math.floor(nullifiedPairs / 2)}** ! ✨`)
                     .setColor(0x00AE86)
                     .addFields(
                         { name: 'Status', value: '✅ Challenges cleared and status set to **Available**' },
