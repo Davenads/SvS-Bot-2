@@ -50,8 +50,15 @@ module.exports = {
         const loserRank = interaction.options.getInteger('loser_rank');
         const userId = interaction.user.id;
 
+        // Log command invocation details
+        console.log(`[${new Date().toISOString()}] Command invoked: /reportwin by ${interaction.user.tag} (${interaction.user.id}), Interaction ID: ${interaction.id}`);
+
         try {
+            // Defer the reply to avoid delays and allow more processing time
+            await interaction.deferReply({ ephemeral: true });
+
             // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
+            console.log(`[${new Date().toISOString()}] Fetching data from Google Sheets for reporting win...`);
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
                 range: `SvS Ladder!A2:K`,  // Fetch columns A to K
@@ -59,7 +66,8 @@ module.exports = {
 
             const rows = result.data.values;
             if (!rows || !rows.length) {
-                return interaction.reply({ content: 'No data available on the leaderboard.', ephemeral: true });
+                console.log(`[${new Date().toISOString()}] No data available on the leaderboard.`);
+                return interaction.editReply({ content: 'No data available on the leaderboard.' });
             }
 
             // Find the winner and loser rows based on rank
@@ -67,7 +75,8 @@ module.exports = {
             const loserRow = rows.find(row => parseInt(row[0]) === loserRank);
 
             if (!winnerRow || !loserRow) {
-                return interaction.reply({ content: 'Invalid ranks provided.', ephemeral: true });
+                console.log(`[${new Date().toISOString()}] Invalid ranks provided: Winner Rank - ${winnerRank}, Loser Rank - ${loserRank}`);
+                return interaction.editReply({ content: 'Invalid ranks provided.' });
             }
 
             const winnerDiscordId = winnerRow[8]; // Discord user ID of the winner
@@ -75,7 +84,8 @@ module.exports = {
 
             // Check if the user is allowed to execute this command
             if (userId !== winnerDiscordId && userId !== loserDiscordId && !interaction.member.roles.cache.some(role => role.name === 'SvS Manager')) {
-                return interaction.reply({ content: 'You do not have permission to report this challenge result.', ephemeral: true });
+                console.log(`[${new Date().toISOString()}] User (${interaction.user.tag}) does not have permission to report this result.`);
+                return interaction.editReply({ content: 'You do not have permission to report this challenge result.' });
             }
 
             const winnerDiscordName = winnerRow[4]; // Discord name of the winner
@@ -93,6 +103,7 @@ module.exports = {
 
             if (winnerRank > loserRank) {
                 // Swap rows if the winner has a worse rank (higher number)
+                console.log(`[${new Date().toISOString()}] Swapping ranks: Winner Rank - ${winnerRank}, Loser Rank - ${loserRank}`);
                 updatedWinnerRow = [...loserRow];
                 updatedWinnerRow[0] = String(winnerRow[0]); // Keep the original rank (Column A)
                 
@@ -122,6 +133,7 @@ module.exports = {
             updatedLoserRow[7] = ''; // Clear Opp#
 
             // Create a batchUpdate request to update the rows with new values
+            console.log(`[${new Date().toISOString()}] Updating Google Sheets with new values for ranks: Winner Rank - ${winnerRank}, Loser Rank - ${loserRank}`);
             const requests = [
                 {
                     updateCells: {
@@ -172,6 +184,8 @@ module.exports = {
                     requests
                 }
             });
+
+            console.log(`[${new Date().toISOString()}] Successfully updated Google Sheets with challenge results.`);
 
             // Manually assign colors to the element column after the swap
             const elementUpdateRequests = [
@@ -231,6 +245,8 @@ module.exports = {
                 }
             });
 
+            console.log(`[${new Date().toISOString()}] Successfully updated element colors in Google Sheets.`);
+
             // Create an embed message to announce the result
             const embed = new EmbedBuilder()
                 .setTitle('🔥 SvS Challenge Result Reported ⚔️')
@@ -246,20 +262,15 @@ ${winnerRank > loserRank ? '🏆 The ranks have been swapped between the winner 
                 .setTimestamp();
 
             // Send the embed message
-            await interaction.channel.send({ embeds: [embed] });
+            await interaction.followUp({ embeds: [embed] });
 
-            return interaction.reply({ content: `Challenge result reported successfully!`, ephemeral: true });
+            console.log(`[${new Date().toISOString()}] Challenge result embed sent to channel.`);
 
         } catch (error) {
-            console.error('Error reporting match result:', error);
+            console.error(`[${new Date().toISOString()}] Error reporting match result (Interaction ID: ${interaction.id}):`, error);
 
             // Public error message
-            await interaction.channel.send('An error occurred while reporting the match result. Please try again later.');
-
-            return interaction.reply({
-                content: 'An error occurred while reporting the match result. Please try again later.',
-                ephemeral: true
-            });
+            await interaction.followUp('An error occurred while reporting the match result. Please try again later.');
         }
     },
 };
