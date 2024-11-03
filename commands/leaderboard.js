@@ -17,7 +17,18 @@ module.exports = {
         .setDescription('Displays the SvS leaderboard with specs and elements'),
     
     async execute(interaction) {
+        console.log(`[${new Date().toISOString()}] Command invoked: /leaderboard by ${interaction.user.tag} (${interaction.user.id})`);
+        let deferred = false;
+        const deferIfNecessary = async () => {
+            if (!deferred) {
+                await interaction.deferReply({ ephemeral: true });
+                deferred = true;
+            }
+        };
+
         try {
+            await deferIfNecessary();
+
             // Fetch data from the Google Sheet
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
@@ -25,14 +36,14 @@ module.exports = {
             });
 
             const rows = result.data.values;
-            if (!rows.length) {
-                return interaction.reply({ content: 'No data available on the leaderboard.', ephemeral: true });
+            if (!rows || !rows.length) {
+                return await interaction.editReply({ content: 'No data available on the leaderboard.' });
             }
 
             const validRows = rows.filter(row => row[0] && row[1]); // Filter out rows with missing rank or name
 
             if (!validRows.length) {
-                return interaction.reply({ content: 'No valid data available on the leaderboard.', ephemeral: true });
+                return await interaction.editReply({ content: 'No valid data available on the leaderboard.' });
             }
 
             const embeds = [];
@@ -84,7 +95,7 @@ module.exports = {
 
             // If only one embed is required
             if (embeds.length === 1) {
-                return await interaction.reply({ embeds: [embeds[0]], ephemeral: true });
+                return await interaction.editReply({ embeds: [embeds[0]] });
             }
 
             // Pagination logic with buttons
@@ -112,11 +123,9 @@ module.exports = {
                     .setDisabled(embeds.length <= 1) // Disable if there's only one page
             );
 
-            const message = await interaction.reply({
+            const message = await interaction.editReply({
                 embeds: [embeds[currentPage]],
                 components: [buttonRow],
-                fetchReply: true,
-                ephemeral: true, // Respond only to the user
             });
 
             const collector = message.createMessageComponentCollector({
@@ -169,7 +178,10 @@ module.exports = {
                 });
             });
         } catch (error) {
-            await interaction.reply({ content: 'There was an error retrieving the leaderboard data.', ephemeral: true });
+            logError(`Error during leaderboard execution: ${error.message}\nStack: ${error.stack}`);
+            console.error(`Detailed error: ${error.message}`);
+            await deferIfNecessary();
+            await interaction.editReply({ content: 'There was an error retrieving the leaderboard data.' });
         }
     },
 };

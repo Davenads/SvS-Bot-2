@@ -191,12 +191,9 @@ module.exports = {
       // Send the Embed to the channel
       await interaction.channel.send({ embeds: [challengeEmbed] });
 
-      // Only respond to the interaction if not already responded
-      if (!deferred) {
-        return await interaction.reply({
-          content: `Challenge initiated successfully!`,
-          ephemeral: true
-        });
+      // Update the interaction reply only once
+      if (deferred) {
+        await interaction.editReply({ content: `Challenge initiated successfully!` });
       }
     } catch (error) {
       logError(
