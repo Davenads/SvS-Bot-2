@@ -53,9 +53,19 @@ module.exports = {
         // Log command invocation details
         console.log(`[${new Date().toISOString()}] Command invoked: /reportwin by ${interaction.user.tag} (${interaction.user.id}), Interaction ID: ${interaction.id}`);
 
+        let deferred = false;
+
+        const deferIfNecessary = async () => {
+            if (!deferred) {
+                await interaction.deferReply({ ephemeral: true });
+                console.log(`[${new Date().toISOString()}] Interaction deferred to allow more processing time.`);
+                deferred = true;
+            }
+        };
+
         try {
             // Defer the reply to avoid delays and allow more processing time
-            await interaction.deferReply({ ephemeral: true });
+            await deferIfNecessary();
 
             // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
             console.log(`[${new Date().toISOString()}] Fetching data from Google Sheets for reporting win...`);
@@ -67,6 +77,7 @@ module.exports = {
             const rows = result.data.values;
             if (!rows || !rows.length) {
                 console.log(`[${new Date().toISOString()}] No data available on the leaderboard.`);
+                await deferIfNecessary();
                 return interaction.editReply({ content: 'No data available on the leaderboard.' });
             }
 
@@ -76,6 +87,7 @@ module.exports = {
 
             if (!winnerRow || !loserRow) {
                 console.log(`[${new Date().toISOString()}] Invalid ranks provided: Winner Rank - ${winnerRank}, Loser Rank - ${loserRank}`);
+                await deferIfNecessary();
                 return interaction.editReply({ content: 'Invalid ranks provided.' });
             }
 
@@ -85,6 +97,7 @@ module.exports = {
             // Check if the user is allowed to execute this command
             if (userId !== winnerDiscordId && userId !== loserDiscordId && !interaction.member.roles.cache.some(role => role.name === 'SvS Manager')) {
                 console.log(`[${new Date().toISOString()}] User (${interaction.user.tag}) does not have permission to report this result.`);
+                await deferIfNecessary();
                 return interaction.editReply({ content: 'You do not have permission to report this challenge result.' });
             }
 
@@ -178,6 +191,7 @@ module.exports = {
             ];
 
             // Execute the batchUpdate request to update rows
+            await deferIfNecessary();
             await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: SPREADSHEET_ID,
                 resource: {
@@ -238,6 +252,7 @@ module.exports = {
             ];
 
             // Execute the batchUpdate request to update element colors
+            await deferIfNecessary();
             await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: SPREADSHEET_ID,
                 resource: {
@@ -262,6 +277,7 @@ ${winnerRank > loserRank ? '🏆 The ranks have been swapped between the winner 
                 .setTimestamp();
 
             // Send the embed message
+            await deferIfNecessary();
             await interaction.followUp({ embeds: [embed] });
 
             console.log(`[${new Date().toISOString()}] Challenge result embed sent to channel.`);
@@ -270,6 +286,7 @@ ${winnerRank > loserRank ? '🏆 The ranks have been swapped between the winner 
             console.error(`[${new Date().toISOString()}] Error reporting match result (Interaction ID: ${interaction.id}):`, error);
 
             // Public error message
+            await deferIfNecessary();
             await interaction.followUp('An error occurred while reporting the match result. Please try again later.');
         }
     },

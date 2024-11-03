@@ -28,7 +28,8 @@ for (const file of commandFiles) {
 
 // Event listener for when the bot becomes ready and online
 client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}`);
+    const timestamp = new Date().toLocaleString();
+    console.log(`Logged in as ${client.user.tag} at ${timestamp}`);
 });
 
 // Event listener for handling interactions (slash commands and autocomplete)
