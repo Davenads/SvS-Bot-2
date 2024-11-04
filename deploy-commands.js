@@ -16,30 +16,21 @@ const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
 
 (async () => {
     try {
-        console.log('Started refreshing application (/) commands.');
+        console.log('Started refreshing application (/) commands for multiple guilds.');
 
-        // Fetch current commands
-        const currentCommands = await rest.get(
-            Routes.applicationCommands(process.env.CLIENT_ID),
+        // Deploy to test server
+        await rest.put(
+            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.TEST_GUILD_ID),
+            { body: commands }
         );
+        console.log('Successfully reloaded application (/) commands for the test guild.');
 
-        const currentCommandNames = currentCommands.map(cmd => cmd.name);
-        const newCommandNames = commands.map(cmd => cmd.name);
-
-        const commandsToUpdate = commands.filter(cmd => {
-            const existingCommand = currentCommands.find(currentCmd => currentCmd.name === cmd.name);
-            return !existingCommand || JSON.stringify(existingCommand.options) !== JSON.stringify(cmd.options);
-        });
-
-        if (commandsToUpdate.length > 0) {
-            await rest.put(
-                Routes.applicationCommands(process.env.CLIENT_ID),
-                { body: commandsToUpdate }
-            );
-            console.log(`Successfully updated ${commandsToUpdate.length} application (/) commands.`);
-        } else {
-            console.log('No changes detected in commands. Skipping update.');
-        }
+        // Deploy to live server (Diablo Dueling Leagues)
+        await rest.put(
+            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.LIVE_GUILD_ID),
+            { body: commands }
+        );
+        console.log('Successfully reloaded application (/) commands for the live guild.');
     } catch (error) {
         console.error('Error refreshing commands:', error);
     }
