@@ -54,31 +54,32 @@ module.exports = {
                 .setTimestamp()
                 .setFooter({ text: 'SvS Bot Leaderboard', iconURL: interaction.client.user.displayAvatarURL() });
 
-            // Emojis for Spec and Element
-            const specEmojiMap = {
-                Vita: '❤️',  // Vita Spec
-                ES: '🟠'    // ES Spec
-            };
+            // Emojis for Element and Status
             const elementEmojiMap = {
                 Fire: '🔥',
                 Light: '⚡',
                 Cold: '❄️'
+            };
+            const statusEmojiMap = {
+                Available: '✅',
+                Challenge: '❌',
+                Vacation: '🌴'
             };
 
             // Process rows into multiple embeds if necessary
             validRows.forEach((row, index) => {
                 const rank = row[0] || 'N/A';
                 const name = row[1] || 'Unknown';
-                const spec = row[2] || 'Unknown'; // Vita or ES
                 const element = row[3] || 'Unknown'; // Fire, Light, or Cold
                 const status = row[5] || 'Available';
 
-                // Consolidating spec and element into one line next to the player's name
-                const specAndElement = `${specEmojiMap[spec] || ''}${elementEmojiMap[element] || ''}`;
+                // Consolidating element and status into one line next to the player's name
+                const elementEmoji = elementEmojiMap[element] || '';
+                const statusEmoji = statusEmojiMap[status] || '';
 
                 currentEmbed.addFields({
-                    name: `#${rank} - ${name} ${specAndElement}`, // Player's name with spec and element emojis
-                    value: `Status: ${status}`,
+                    name: `#${rank} - ${name} ${elementEmoji}`, // Player's name with element emoji
+                    value: `Status: ${statusEmoji} ${status}`,
                     inline: false
                 });
 
