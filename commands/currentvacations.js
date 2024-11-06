@@ -61,12 +61,12 @@ module.exports = {
                     const playerRank = player[0]; // Rank of player
                     const playerName = player[1]; // Name of player
                     const playerElement = player[3]; // Element of player
-                    const vacationDate = player[6] ? player[6] : 'Enjoying an indefinite holiday 😎'; // Vacation start date with witty fallback
+                    const vacationDate = player[6] ? player[6].split(',')[0] : 'Enjoying an indefinite holiday 😎'; // Vacation start date with witty fallback
                     const discordUserName = player[4]; // Discord username
 
                     vacationEmbed.addFields({
                     name: `Rank #${playerRank}: ${playerName} (${discordUserName})`,
-                    value: `Element: ${elementEmojiMap[playerElement]} | Start: ${vacationDate.split(' ')[0]}`,
+                    value: `Element: ${elementEmojiMap[playerElement]} | Start: ${vacationDate}`,
                     inline: false
                 });
                 });
