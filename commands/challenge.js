@@ -2,7 +2,7 @@ require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
-const { logError } = require('../logger'); // Import the logger
+const { logError } = require('../logger');
 
 const sheets = google.sheets({
   version: 'v4',
@@ -16,8 +16,10 @@ const sheets = google.sheets({
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = 'SvS Ladder';
+const TOP_10_MAX_JUMP = 2;
+const REGULAR_MAX_JUMP = 3;
 
-// Spec and Element Emoji Maps
+// Emoji maps for spec and element indicators
 const specEmojiMap = {
   Vita: '❤️',
   ES: '🟠'
@@ -38,22 +40,18 @@ module.exports = {
         .setName('challenger_rank')
         .setDescription('Your rank on the leaderboard')
         .setRequired(true)
+        .setMinValue(1)
     )
     .addIntegerOption(option =>
       option
         .setName('target_rank')
         .setDescription('The rank of the player you want to challenge')
         .setRequired(true)
+        .setMinValue(1)
     ),
 
-  async execute (interaction) {
-    let deferred = false;
-    const deferIfNecessary = async () => {
-      if (!deferred) {
-        await interaction.deferReply({ ephemeral: true });
-        deferred = true;
-      }
-    };
+  async execute(interaction) {
+    await interaction.deferReply({ ephemeral: true });
 
     try {
       const challengerRank = interaction.options.getInteger('challenger_rank');
@@ -61,149 +59,158 @@ module.exports = {
       const userId = interaction.user.id;
       const memberRoles = interaction.member.roles.cache;
 
-      console.log(`Challenger Rank: ${challengerRank}, Target Rank: ${targetRank}`);
+      // Log the challenge attempt
+      console.log(`Challenge attempt - Challenger: ${challengerRank}, Target: ${targetRank}, User: ${userId}`);
 
       // Prevent challenging downward in the ladder
       if (challengerRank <= targetRank) {
-        await deferIfNecessary();
         return await interaction.editReply({
-          content: `Nice try <@${userId}>, but you can't challenge downward in the ladder!`
+          content: `You cannot challenge players ranked below you.`
         });
       }
 
-      // Fetch all data from the sheet dynamically
-      await deferIfNecessary();
+      // Fetch ladder data
       const result = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:I` // Fetches all rows starting from A2 to the end of column I
+        range: `${SHEET_NAME}!A2:I`
       });
 
       const rows = result.data.values;
-      if (!rows || !rows.length) {
+      if (!rows?.length) {
         logError('No data available on the leaderboard.');
-        await deferIfNecessary();
         return await interaction.editReply({
-          content: 'No data available on the leaderboard.'
+          content: 'Unable to access leaderboard data. Please try again later.'
         });
       }
 
-      // Find the challenger and target rows based on rank
-      const challengerRow = rows.find(
-        row => parseInt(row[0]) === challengerRank
-      );
+      // Get available players between target and challenger
+      const playersBetween = rows.filter(row => {
+        const rank = parseInt(row[0]);
+        return rank > targetRank && rank < challengerRank;
+      });
+
+      // Filter out vacation players
+      const availablePlayersBetween = playersBetween.filter(row => row[5] !== 'Vacation');
+      const availableJumpSize = availablePlayersBetween.length + 1; // +1 to count the actual jump to target
+
+      // Apply rank jump restrictions
+      if (challengerRank <= 10) {
+        // Top 10 restriction
+        if (availableJumpSize > TOP_10_MAX_JUMP) {
+          const maxTarget = rows.find(row => 
+            parseInt(row[0]) === challengerRank - TOP_10_MAX_JUMP && row[5] !== 'Vacation'
+          );
+          return await interaction.editReply({
+            content: `Top 10 players can only challenge up to ${TOP_10_MAX_JUMP} ranks ahead. The highest rank you can challenge is ${maxTarget ? maxTarget[0] : challengerRank - TOP_10_MAX_JUMP}.`
+          });
+        }
+      } else {
+        // Regular player restriction
+        if (availableJumpSize > REGULAR_MAX_JUMP) {
+          const maxTarget = rows.find(row => 
+            parseInt(row[0]) === challengerRank - REGULAR_MAX_JUMP && row[5] !== 'Vacation'
+          );
+          const skippedRanks = availablePlayersBetween
+            .map(row => row[0])
+            .join(', ');
+          return await interaction.editReply({
+            content: `Players outside top 10 can only challenge up to ${REGULAR_MAX_JUMP} ranks ahead (excluding players on vacation). You're trying to skip ranks: ${skippedRanks}`
+          });
+        }
+      }
+
+      // Validate challenger and target
+      const challengerRow = rows.find(row => parseInt(row[0]) === challengerRank);
       const targetRow = rows.find(row => parseInt(row[0]) === targetRank);
 
       if (!challengerRow || !targetRow) {
-        await deferIfNecessary();
         return await interaction.editReply({
-          content: 'Invalid ranks provided.'
+          content: 'One or both ranks were not found on the leaderboard.'
         });
       }
 
-      // Validate that the person issuing the challenge is the one making the command
-      if (challengerRow[8] !== userId.toString() && !memberRoles.some(role => role.name === 'SvS Manager')) {
-        await deferIfNecessary();
+      // Verify challenger identity
+      if (challengerRow[8] !== userId && !memberRoles.some(role => role.name === 'SvS Manager')) {
         return await interaction.editReply({
-          content: 'You can only initiate challenges for your own character, unless you have the @SvS Manager role.'
+          content: 'You can only initiate challenges for your own rank.'
         });
       }
 
-      // Ensure both players are available
+      // Check availability
       if (challengerRow[5] !== 'Available' || targetRow[5] !== 'Available') {
-        await deferIfNecessary();
         return await interaction.editReply({
-          content: 'One or both players are not available for a challenge.'
+          content: `Challenge failed: ${challengerRow[5] !== 'Available' ? 'You are' : 'Your target is'} not available for challenges.`
         });
       }
 
-      // Format the challenge date in the shortened format
-      const challengeDate = new Date(interaction.createdTimestamp).toLocaleString('en-US', {
+      // Format challenge date
+      const challengeDate = new Date().toLocaleString('en-US', {
         month: 'numeric',
         day: 'numeric',
         hour: 'numeric',
         minute: 'numeric',
         hour12: true,
-        timeZone: 'America/New_York', // Adjust for your timezone
+        timeZone: 'America/New_York',
         timeZoneName: 'short'
       });
 
-      // Update the status, challenge date, and opponent columns in Google Sheets for both players
-      const challengerRowIndex =
-        rows.findIndex(row => parseInt(row[0]) === challengerRank) + 2;
-      const targetRowIndex =
-        rows.findIndex(row => parseInt(row[0]) === targetRank) + 2;
+      // Update both players' status
+      const challengerRowIndex = rows.findIndex(row => parseInt(row[0]) === challengerRank) + 2;
+      const targetRowIndex = rows.findIndex(row => parseInt(row[0]) === targetRank) + 2;
 
-      const challengerUpdateRange = `${SHEET_NAME}!F${challengerRowIndex}:H${challengerRowIndex}`;
-      const targetUpdateRange = `${SHEET_NAME}!F${targetRowIndex}:H${targetRowIndex}`;
+      const updatePromises = [
+        sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `${SHEET_NAME}!F${challengerRowIndex}:H${challengerRowIndex}`,
+          valueInputOption: 'USER_ENTERED',
+          resource: { values: [['Challenge', challengeDate, targetRank]] }
+        }),
+        sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `${SHEET_NAME}!F${targetRowIndex}:H${targetRowIndex}`,
+          valueInputOption: 'USER_ENTERED',
+          resource: { values: [['Challenge', challengeDate, challengerRank]] }
+        })
+      ];
 
-      await deferIfNecessary();
-      // Update Challenger Status, Challenge Date, and Opponent
-      const challengerUpdateResult = await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: challengerUpdateRange,
-        valueInputOption: 'USER_ENTERED',
-        resource: { values: [['Challenge', challengeDate, targetRank]] }
-      });
+      await Promise.all(updatePromises);
 
-      if (challengerUpdateResult.status !== 200) {
-        throw new Error('Failed to update challenger data in Google Sheets');
-      }
-
-      // Update Target Status, Challenge Date, and Opponent
-      const targetUpdateResult = await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: targetUpdateRange,
-        valueInputOption: 'USER_ENTERED',
-        resource: { values: [['Challenge', challengeDate, challengerRank]] }
-      });
-
-      if (targetUpdateResult.status !== 200) {
-        throw new Error('Failed to update target data in Google Sheets');
-      }
-
-      // Create an Embed Message with User Mentions
-      const challengerSpecEmoji = specEmojiMap[challengerRow[2]] || '';
-      const challengerElementEmoji = elementEmojiMap[challengerRow[3]] || '';
-      const targetSpecEmoji = specEmojiMap[targetRow[2]] || '';
-      const targetElementEmoji = elementEmojiMap[targetRow[3]] || '';
-
+      // Create and send announcement embed
       const challengeEmbed = new EmbedBuilder()
         .setColor(0x00ae86)
-        .setTitle('New Challenge Initiated!')
+        .setTitle('⚔️ New Challenge Initiated!')
         .addFields(
           {
             name: 'Challenger',
-            value: `**Rank #${challengerRank}** (<@${challengerRow[8]}>) ${challengerSpecEmoji}${challengerElementEmoji}`,
+            value: `Rank #${challengerRank} (<@${challengerRow[8]}>)
+${specEmojiMap[challengerRow[2]] || ''} ${elementEmojiMap[challengerRow[3]] || ''}`,
+            inline: true
+          },
+          {
+            name: '​',
+            value: 'VS',
             inline: true
           },
           {
             name: 'Challenged',
-            value: `**Rank #${targetRank}** (<@${targetRow[8]}>) ${targetSpecEmoji}${targetElementEmoji}`,
+            value: `Rank #${targetRank} (<@${targetRow[8]}>)
+${specEmojiMap[targetRow[2]] || ''} ${elementEmojiMap[targetRow[3]] || ''}`,
             inline: true
           }
         )
         .setTimestamp()
         .setFooter({
-          text: 'Good luck to both players!',
+          text: 'May the best player win!',
           iconURL: interaction.client.user.displayAvatarURL()
         });
 
-      // Send the Embed to the channel
       await interaction.channel.send({ embeds: [challengeEmbed] });
+      await interaction.editReply({ content: 'Challenge successfully initiated!' });
 
-      // Update the interaction reply only once
-      if (deferred) {
-        await interaction.editReply({ content: `Challenge initiated successfully!` });
-      }
     } catch (error) {
-      logError(
-        `Error during challenge execution: ${error.message}\nStack: ${error.stack}`
-      );
-      console.error(`Detailed error: ${error.message}`);
-      await deferIfNecessary();
+      logError(`Challenge command error: ${error.message}\nStack: ${error.stack}`);
       await interaction.editReply({
-        content:
-          'There was an error initiating the challenge. Please try again.'
+        content: 'An error occurred while processing your challenge. Please try again later.'
       });
     }
   }
