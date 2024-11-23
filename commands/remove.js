@@ -15,7 +15,9 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const sheetId = 0;
+const MAIN_SHEET = 'SvS Ladder';
+const VACATION_SHEET = 'Extended Vacation';
+const sheetId = 0; // SvS Ladder tab
 
 // Emoji mappings
 const elementEmojis = {
@@ -51,7 +53,6 @@ module.exports = {
         ),
 
     async execute(interaction) {
-        // Log command invocation
         console.log(`\n[${new Date().toISOString()}] Remove Command`);
         console.log(`├─ Invoked by: ${interaction.user.tag}`);
 
@@ -69,13 +70,19 @@ module.exports = {
         try {
             const rankToRemove = interaction.options.getInteger('rank');
 
-            // Fetch all data from the sheet
-            const result = await sheets.spreadsheets.values.get({
-                spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:K`,
-            });
+            // First, fetch data from both sheets
+            const [mainResult, vacationResult] = await Promise.all([
+                sheets.spreadsheets.values.get({
+                    spreadsheetId: SPREADSHEET_ID,
+                    range: `${MAIN_SHEET}!A2:K`
+                }),
+                sheets.spreadsheets.values.get({
+                    spreadsheetId: SPREADSHEET_ID,
+                    range: `${VACATION_SHEET}!A2:K`
+                })
+            ]);
 
-            const rows = result.data.values;
+            const rows = mainResult.data.values;
             if (!rows || !rows.length) {
                 console.log('└─ Error: No data found in leaderboard');
                 return interaction.editReply({
@@ -84,7 +91,7 @@ module.exports = {
                 });
             }
 
-            // Find the row index and player data
+            // Find the row to remove
             const rowIndex = rows.findIndex(row => row[0] && parseInt(row[0]) === rankToRemove);
             if (rowIndex === -1) {
                 console.log(`└─ Error: Rank ${rankToRemove} not found`);
@@ -102,14 +109,36 @@ module.exports = {
             const discordUsername = playerData[4];
             const discordId = playerData[8];
 
-            // Log removal details
             console.log('├─ Removing Player:');
             console.log(`│  ├─ Rank: #${rankToRemove}`);
             console.log(`│  └─ Discord: ${discordUsername}`);
 
+            // Find first empty row in Extended Vacation tab
+            const vacationRows = vacationResult.data.values || [];
+            let emptyRowIndex = vacationRows.length + 2; // Default to appending at end
+            for (let i = 0; i < vacationRows.length; i++) {
+                if (!vacationRows[i] || !vacationRows[i][1]) { // Check Name column
+                    emptyRowIndex = i + 2;
+                    break;
+                }
+            }
+
+            console.log(`├─ Moving to Extended Vacation row ${emptyRowIndex}`);
+
+            // Create batch update requests
             const requests = [];
 
-            // 1. Handle active challenges with the player being removed
+            // 1. Add row to Extended Vacation tab
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `${VACATION_SHEET}!A${emptyRowIndex}:K${emptyRowIndex}`,
+                valueInputOption: 'USER_ENTERED',
+                resource: {
+                    values: [playerData] // Copy entire row
+                }
+            });
+
+            // 2. Handle active challenges before removal
             if (playerData[5] === 'Challenge' && playerData[7]) {
                 const opponentRank = parseInt(playerData[7]);
                 const opponentIndex = rows.findIndex(row => row[0] && parseInt(row[0]) === opponentRank);
@@ -129,16 +158,16 @@ module.exports = {
                                 values: [
                                     { userEnteredValue: { stringValue: 'Available' } },
                                     { userEnteredValue: { stringValue: '' } },
-                                    { userEnteredValue: { stringValue: '' } }
+                                    { userEnteredValue: { stringValue: '' }, userEnteredFormat: { horizontalAlignment: 'RIGHT' } }
                                 ]
                             }],
-                            fields: 'userEnteredValue'
+                            fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
                         }
                     });
                 }
             }
 
-            // 2. Delete the row
+            // 3. Delete the row from main ladder
             requests.push({
                 deleteDimension: {
                     range: {
@@ -150,7 +179,7 @@ module.exports = {
                 }
             });
 
-            // 3. Update ranks and opponent references
+            // 4. Update remaining ranks and opponent references
             let ranksUpdated = 0;
             for (let i = rowIndex + 1; i < rows.length; i++) {
                 const currentRow = rows[i];
@@ -160,6 +189,7 @@ module.exports = {
                 const newRank = currentRank - 1;
                 ranksUpdated++;
 
+                // Update rank number
                 requests.push({
                     updateCells: {
                         range: {
@@ -179,6 +209,7 @@ module.exports = {
                     }
                 });
 
+                // Update opponent references if needed
                 if (currentRow[5] === 'Challenge' && currentRow[7]) {
                     const oppRank = parseInt(currentRow[7]);
                     
@@ -195,10 +226,11 @@ module.exports = {
                                 },
                                 rows: [{
                                     values: [{
-                                        userEnteredValue: { stringValue: (oppRank - 1).toString() }
+                                        userEnteredValue: { stringValue: (oppRank - 1).toString() },
+                                        userEnteredFormat: { horizontalAlignment: 'RIGHT' }
                                     }]
                                 }],
-                                fields: 'userEnteredValue'
+                                fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
                             }
                         });
                     } else if (oppRank === rankToRemove) {
@@ -216,10 +248,10 @@ module.exports = {
                                     values: [
                                         { userEnteredValue: { stringValue: 'Available' } },
                                         { userEnteredValue: { stringValue: '' } },
-                                        { userEnteredValue: { stringValue: '' } }
+                                        { userEnteredValue: { stringValue: '' }, userEnteredFormat: { horizontalAlignment: 'RIGHT' } }
                                     ]
                                 }],
-                                fields: 'userEnteredValue'
+                                fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
                             }
                         });
                     }
@@ -228,16 +260,18 @@ module.exports = {
 
             console.log(`├─ Updated ${ranksUpdated} ranks`);
 
-            // Execute updates
-            await sheets.spreadsheets.batchUpdate({
-                spreadsheetId: SPREADSHEET_ID,
-                resource: { requests }
-            });
+            // Execute all updates
+            if (requests.length > 0) {
+                await sheets.spreadsheets.batchUpdate({
+                    spreadsheetId: SPREADSHEET_ID,
+                    resource: { requests }
+                });
+            }
 
             // Verify ranks
             const verificationResult = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:A`,
+                range: `${MAIN_SHEET}!A2:A`,
             });
 
             const updatedRanks = verificationResult.data.values;
@@ -279,17 +313,17 @@ module.exports = {
                     }
                 )
                 .setFooter({ 
-                    text: `${ranksAreCorrect ? 'All ladder ranks have been updated successfully!' : 'Player removed, but rank verification needed.'}`,
+                    text: `Player moved to Extended Vacation. ${ranksAreCorrect ? 'All ladder ranks updated successfully!' : 'Rank verification needed.'}`,
                     iconURL: interaction.client.user.displayAvatarURL()
                 })
                 .setTimestamp();
 
-            // Send embed
+            // Send the embed to the channel
             await interaction.channel.send({ embeds: [farewellEmbed] });
 
-            // Send confirmation
+            // Send confirmation to command issuer
             await interaction.editReply({
-                content: `Successfully removed ${playerName} from the ladder and updated all affected rankings and challenges.`,
+                content: `Successfully moved ${playerName} to Extended Vacation and updated all affected rankings and challenges.`,
                 ephemeral: true
             });
 
