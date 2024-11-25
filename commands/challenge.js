@@ -18,6 +18,7 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = 'SvS Ladder';
 const TOP_10_MAX_JUMP = 2;
 const REGULAR_MAX_JUMP = 3;
+const TOP_10_THRESHOLD = 10;
 
 // Emoji maps for spec and element indicators
 const specEmojiMap = {
@@ -51,6 +52,10 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    const timestamp = new Date().toISOString();
+    console.log(`\n[${timestamp}] Challenge Command Execution Started`);
+    console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
+
     await interaction.deferReply({ ephemeral: true });
 
     try {
@@ -59,17 +64,20 @@ module.exports = {
       const userId = interaction.user.id;
       const memberRoles = interaction.member.roles.cache;
 
-      // Log the challenge attempt
-      console.log(`Challenge attempt - Challenger: ${challengerRank}, Target: ${targetRank}, User: ${userId}`);
+      console.log(`├─ Challenge Request:`);
+      console.log(`│  ├─ Challenger Rank: #${challengerRank}`);
+      console.log(`│  └─ Target Rank: #${targetRank}`);
 
       // Prevent challenging downward in the ladder
       if (challengerRank <= targetRank) {
+        console.log('└─ Rejected: Attempted to challenge downward');
         return await interaction.editReply({
           content: `You cannot challenge players ranked below you.`
         });
       }
 
       // Fetch ladder data
+      console.log('├─ Fetching ladder data...');
       const result = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
         range: `${SHEET_NAME}!A2:I`
@@ -77,6 +85,7 @@ module.exports = {
 
       const rows = result.data.values;
       if (!rows?.length) {
+        console.log('└─ Error: No data available on the leaderboard');
         logError('No data available on the leaderboard.');
         return await interaction.editReply({
           content: 'Unable to access leaderboard data. Please try again later.'
@@ -91,12 +100,26 @@ module.exports = {
 
       // Filter out vacation players
       const availablePlayersBetween = playersBetween.filter(row => row[5] !== 'Vacation');
-      const availableJumpSize = availablePlayersBetween.length + 1; // +1 to count the actual jump to target
+      const availableJumpSize = availablePlayersBetween.length + 1;
 
-      // Apply rank jump restrictions
-      if (challengerRank <= 10) {
+      console.log(`├─ Challenge Analysis:`);
+      console.log(`│  ├─ Players between: ${playersBetween.length}`);
+      console.log(`│  ├─ Available players between: ${availablePlayersBetween.length}`);
+      console.log(`│  └─ Effective jump size: ${availableJumpSize}`);
+
+      // Special restriction for challenging top 10 players
+      if (targetRank <= TOP_10_THRESHOLD && challengerRank > TOP_10_THRESHOLD) {
+        if (availableJumpSize > TOP_10_MAX_JUMP) {
+          console.log('└─ Rejected: Non-top 10 player attempting to challenge top 10 beyond limit');
+          const maxAllowedRank = challengerRank - TOP_10_MAX_JUMP;
+          return await interaction.editReply({
+            content: `Players outside top 10 can only challenge up to ${TOP_10_MAX_JUMP} ranks ahead when targeting top 10 players. The highest rank you can challenge is ${maxAllowedRank}.`
+          });
+        }
+      } else if (challengerRank <= TOP_10_THRESHOLD) {
         // Top 10 restriction
         if (availableJumpSize > TOP_10_MAX_JUMP) {
+          console.log('└─ Rejected: Top 10 player exceeding max jump');
           const maxTarget = rows.find(row => 
             parseInt(row[0]) === challengerRank - TOP_10_MAX_JUMP && row[5] !== 'Vacation'
           );
@@ -107,6 +130,7 @@ module.exports = {
       } else {
         // Regular player restriction
         if (availableJumpSize > REGULAR_MAX_JUMP) {
+          console.log('└─ Rejected: Regular player exceeding max jump');
           const maxTarget = rows.find(row => 
             parseInt(row[0]) === challengerRank - REGULAR_MAX_JUMP && row[5] !== 'Vacation'
           );
@@ -120,10 +144,12 @@ module.exports = {
       }
 
       // Validate challenger and target
+      console.log('├─ Validating challenger and target...');
       const challengerRow = rows.find(row => parseInt(row[0]) === challengerRank);
       const targetRow = rows.find(row => parseInt(row[0]) === targetRank);
 
       if (!challengerRow || !targetRow) {
+        console.log('└─ Rejected: Invalid ranks provided');
         return await interaction.editReply({
           content: 'One or both ranks were not found on the leaderboard.'
         });
@@ -131,6 +157,7 @@ module.exports = {
 
       // Verify challenger identity
       if (challengerRow[8] !== userId && !memberRoles.some(role => role.name === 'SvS Manager')) {
+        console.log('└─ Rejected: Unauthorized challenger');
         return await interaction.editReply({
           content: 'You can only initiate challenges for your own rank.'
         });
@@ -138,6 +165,7 @@ module.exports = {
 
       // Check availability
       if (challengerRow[5] !== 'Available' || targetRow[5] !== 'Available') {
+        console.log('└─ Rejected: Player(s) not available');
         return await interaction.editReply({
           content: `Challenge failed: ${challengerRow[5] !== 'Available' ? 'You are' : 'Your target is'} not available for challenges.`
         });
@@ -153,6 +181,8 @@ module.exports = {
         timeZone: 'America/New_York',
         timeZoneName: 'short'
       });
+
+      console.log('├─ Updating challenge status...');
 
       // Update both players' status
       const challengerRowIndex = rows.findIndex(row => parseInt(row[0]) === challengerRank) + 2;
@@ -174,6 +204,7 @@ module.exports = {
       ];
 
       await Promise.all(updatePromises);
+      console.log('├─ Challenge status updated successfully');
 
       // Create and send announcement embed
       const challengeEmbed = new EmbedBuilder()
@@ -206,8 +237,10 @@ ${specEmojiMap[targetRow[2]] || ''} ${elementEmojiMap[targetRow[3]] || ''}`,
 
       await interaction.channel.send({ embeds: [challengeEmbed] });
       await interaction.editReply({ content: 'Challenge successfully initiated!' });
+      console.log('└─ Challenge command completed successfully');
 
     } catch (error) {
+      console.log(`└─ Error executing challenge command: ${error.message}`);
       logError(`Challenge command error: ${error.message}\nStack: ${error.stack}`);
       await interaction.editReply({
         content: 'An error occurred while processing your challenge. Please try again later.'
