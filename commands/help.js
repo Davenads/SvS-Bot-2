@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -6,35 +6,116 @@ module.exports = {
         .setDescription('Shows available commands for SvS duelers'),
     
     async execute(interaction) {
-        const helpText = `**📖 Available SvS Commands**
+        const isManager = interaction.member.roles.cache.some(role => role.name === 'SvS Manager');
+        
+        const duelerEmbed = new EmbedBuilder()
+            .setColor(0x00AE86)
+            .setTitle('📖 SvS Dueler Commands')
+            .setDescription('Available commands for all SvS Duelers')
+            .addFields(
+                {
+                    name: '/challenge [challenger_rank] [target_rank]',
+                    value: 'Challenge another player on the ladder\n• Top 10 players: up to 2 ranks ahead\n• Other players: up to 3 ranks ahead'
+                },
+                {
+                    name: '/reportwin [winner_rank] [loser_rank]',
+                    value: 'Report the outcome of a challenge\n• Must be used by either participant'
+                },
+                {
+                    name: '/currentchallenges',
+                    value: 'View all active challenges\n• Shows challenger, opponent, and deadline'
+                },
+                {
+                    name: '/currentvacations',
+                    value: 'See which players are on vacation\n• Shows vacation start dates and info'
+                },
+                {
+                    name: '/leaderboard',
+                    value: 'View current SvS ladder rankings\n• Shows players, specs, elements, and status'
+                },
+                {
+                    name: '/talrasha [character_name] [element] [optional: notes]',
+                    value: 'Sign up for the Tal Rasha tournament\n• Available to all players (no role required)'
+                }
+            )
+            .setFooter({ 
+                text: 'Note: @SvS Dueler role required for most commands (except /talrasha)',
+                iconURL: interaction.client.user.displayAvatarURL()
+            })
+            .setTimestamp();
 
-**/challenge** [challenger_rank] [target_rank]
-Challenge another player on the ladder
-• Top 10 players can challenge up to 2 ranks ahead
-• Other players can challenge up to 3 ranks ahead
+        const managerEmbed = new EmbedBuilder()
+            .setColor(0xFF0000)
+            .setTitle('🛡️ SvS Manager Commands')
+            .setDescription('Additional commands available for SvS Managers')
+            .addFields(
+                {
+                    name: '/register [character_name] [spec] [element] [disc_user] [optional: notes]',
+                    value: 'Register a new player to the ladder\n• Automatically assigns next available rank'
+                },
+                {
+                    name: '/remove [rank]',
+                    value: 'Remove a player from the ladder\n• Moves them to Extended Vacation tab\n• Updates all rankings automatically'
+                },
+                {
+                    name: '/cancelchallenge [player]',
+                    value: 'Cancel an active challenge\n• Resets both players to Available status'
+                },
+                {
+                    name: '/extendchallenge [player]',
+                    value: 'Extend a challenge deadline by 2 days\n• Updates both players\' challenge dates'
+                },
+                {
+                    name: '/nullchallenges',
+                    value: 'Automatically voids all challenges older than 3 days\n• Resets affected players to Available status'
+                }
+            )
+            .setFooter({ 
+                text: 'These commands require the @SvS Manager role',
+                iconURL: interaction.client.user.displayAvatarURL()
+            })
+            .setTimestamp();
 
-**/reportwin** [winner_rank] [loser_rank]
-Report the outcome of a challenge
-• Must be used by either participant in the challenge
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('toggle_commands')
+                    .setLabel('Toggle Manager Commands')
+                    .setStyle(ButtonStyle.Primary)
+            );
 
-**/currentchallenges**
-View all active challenges on the ladder
-• Shows challenger, opponent, and challenge deadline
+        let components = isManager ? [row] : [];
 
-**/currentvacations**
-See which players are currently on vacation
-• Displays vacation start dates and player information
+        const initialMessage = await interaction.reply({
+            embeds: [duelerEmbed],
+            components,
+            ephemeral: true
+        });
 
-**/leaderboard**
-View the current SvS ladder rankings
-• Shows all players with their specs, elements, and status
+        if (isManager) {
+            const collector = initialMessage.createMessageComponentCollector({
+                time: 60000 // Button will work for 1 minute
+            });
 
-**/talrasha** [character_name] [element] [optional: notes]
-Sign up for the Tal Rasha tournament
-• Available to all players, no special role required
+            let showingManagerCommands = false;
 
-_Note: You must have the @SvS Dueler role to use most commands (except /talrasha)_`;
+            collector.on('collect', async i => {
+                if (i.customId === 'toggle_commands') {
+                    showingManagerCommands = !showingManagerCommands;
+                    await i.update({
+                        embeds: [showingManagerCommands ? managerEmbed : duelerEmbed],
+                        components: [row]
+                    });
+                }
+            });
 
-        await interaction.reply({ content: helpText, ephemeral: true });
+            collector.on('end', () => {
+                // Remove the button after timeout
+                initialMessage.edit({
+                    embeds: [showingManagerCommands ? managerEmbed : duelerEmbed],
+                    components: []
+                }).catch(console.error);
+            });
+        }
     },
 };

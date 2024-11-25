@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
-const moment = require('moment');
+const moment = require('moment');  // Use regular moment
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -23,7 +23,6 @@ module.exports = {
         .setDescription('Nullify challenges older than 3 days'),
     
     async execute(interaction) {
-        // Defer the reply immediately
         await interaction.deferReply({ ephemeral: true });
 
         try {
@@ -35,14 +34,14 @@ module.exports = {
                 });
             }
 
-            // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
+            // Fetch data from the Google Sheet
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:K`,  // Fetch columns A to K
+                range: `SvS Ladder!A2:K`,
             });
 
             const rows = result.data.values;
-            if (!rows || !rows.length) {
+            if (!rows?.length) {
                 return await interaction.editReply({ 
                     content: 'No data available on the leaderboard.' 
                 });
@@ -50,101 +49,166 @@ module.exports = {
 
             const now = moment();
             let requests = [];
-            let nullifiedPairs = 0;
-            const processedOpponents = new Set();
+            const processedChallenges = new Set();
             const nullifiedChallenges = [];
 
-            rows.forEach((row, index) => {
-                const status = row[5]; // Column F: Status
-                const challengeDate = row[6]; // Column G: cDate
-                const opponent = row[7]; // Column H: Opp#
-                const player = row[1]; // Column B: Player Name
-                
-                if (status === 'Challenge' && challengeDate && opponent && !processedOpponents.has(opponent)) {
-                    // Parse challenge date using moment
-                    const challengeDateObj = moment(challengeDate, 'MM/DD, hh:mm A z');
-                    if (challengeDateObj.isValid() && now.diff(challengeDateObj, 'days') > 3) {
-                        // Store challenge details for logging
-                        nullifiedChallenges.push({
-                            player: player,
-                            opponent: rows.find(r => r[0] === opponent)?.[1] || 'Unknown',
-                            date: challengeDate
-                        });
+            // First pass: Identify all challenges that need to be nullified
+            const challengesToNullify = rows.reduce((acc, row, index) => {
+                const status = row[5]; // Status
+                const challengeDateStr = row[6]; // cDate
+                const opponent = row[7]; // Opp#
+                const playerName = row[1]; // Player Name
+                const playerRank = row[0]; // Player Rank
 
-                        // Nullify the challenge by updating the status and clearing relevant columns
-                        row[5] = 'Available'; // Set status to 'Available'
-                        row[6] = ''; // Clear cDate
-                        row[7] = ''; // Clear Opp#
+                if (status === 'Challenge' && challengeDateStr && opponent) {
+                    // Handle multiple date formats and edge cases
+                    let challengeDate;
+                    const dateFormats = [
+                        'M/D, h:mm A',
+                        'M/D/YYYY, h:mm A',
+                        'MM/DD, hh:mm A',
+                        'MM/DD/YYYY, hh:mm A'
+                    ];
 
-                        requests.push({
-                            updateCells: {
-                                range: {
-                                    sheetId: sheetId,
-                                    startRowIndex: index + 1,
-                                    endRowIndex: index + 2,
-                                    startColumnIndex: 0,
-                                    endColumnIndex: 11
-                                },
-                                rows: [
-                                    {
-                                        values: row.map((cellValue, cellIndex) => ({
-                                            userEnteredValue: { stringValue: cellValue },
-                                            userEnteredFormat: cellIndex === 0 ? { horizontalAlignment: 'RIGHT' } : {}
-                                        }))
-                                    }
-                                ],
-                                fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
+                    // Remove any timezone abbreviations before parsing
+                    const cleanDateStr = challengeDateStr.replace(/\s+(EDT|EST)$/, '');
+
+                    // Try parsing with different formats
+                    for (const format of dateFormats) {
+                        const parsed = moment(cleanDateStr, format);
+                        if (parsed.isValid()) {
+                            challengeDate = parsed;
+                            break;
+                        }
+                    }
+
+                    if (challengeDate && challengeDate.isValid()) {
+                        const daysDiff = now.diff(challengeDate, 'hours') / 24;
+                        
+                        if (daysDiff > 3) {
+                            const challengeKey = [playerRank, opponent].sort().join('-');
+                            if (!processedChallenges.has(challengeKey)) {
+                                processedChallenges.add(challengeKey);
+                                acc.push({
+                                    rowIndex: index,
+                                    playerName: playerName,
+                                    opponent: opponent,
+                                    challengeDate: challengeDateStr,
+                                    daysDiff: daysDiff
+                                });
                             }
-                        });
-                        nullifiedPairs++;
-                        processedOpponents.add(opponent);
-                        processedOpponents.add(player);
+                        }
+                    } else {
+                        console.log(`Warning: Could not parse date "${challengeDateStr}" for player ${playerName}`);
                     }
                 }
-            });
+                return acc;
+            }, []);
 
-            if (requests.length > 0) {
-                // Execute the batchUpdate request to nullify old challenges
-                await sheets.spreadsheets.batchUpdate({
-                    spreadsheetId: SPREADSHEET_ID,
-                    resource: {
-                        requests
+            // Second pass: Create update requests for each challenge to nullify
+            challengesToNullify.forEach(challenge => {
+                // Update the challenger's row
+                requests.push({
+                    updateCells: {
+                        range: {
+                            sheetId: sheetId,
+                            startRowIndex: challenge.rowIndex + 1,
+                            endRowIndex: challenge.rowIndex + 2,
+                            startColumnIndex: 5, // Column F (Status)
+                            endColumnIndex: 8 // Through Column H (Opp#)
+                        },
+                        rows: [{
+                            values: [
+                                { userEnteredValue: { stringValue: 'Available' } },
+                                { userEnteredValue: { stringValue: '' } },
+                                { userEnteredValue: { stringValue: '' } }
+                            ]
+                        }],
+                        fields: 'userEnteredValue'
                     }
                 });
 
-                // Create an embed message to announce the result
-                const embed = new EmbedBuilder()
-                    .setTitle('🛡️ Nullified Old Challenges 🛡️')
-                    .setDescription(`✨ Success! Nullified challenge pairs older than 3 days: **${Math.floor(nullifiedPairs / 2)}** ! ✨`)
-                    .setColor(0x00AE86)
-                    .addFields(
-                        { name: 'Status', value: '✅ Challenges cleared and status set to **Available**' },
-                        { name: 'Challenge Date', value: '🗓️ Dates cleared for affected challenges' },
-                        { name: 'Opponents', value: '🤝 Opponent information cleared' }
-                    );
-
-                // Add nullified challenges details if any exist
-                if (nullifiedChallenges.length > 0) {
-                    const challengesList = nullifiedChallenges
-                        .map(c => `${c.player} vs ${c.opponent} (${c.date})`)
-                        .join('\n');
-                    embed.addFields({
-                        name: 'Nullified Challenges',
-                        value: challengesList.length > 1024 ? 
-                            challengesList.substring(0, 1021) + '...' : 
-                            challengesList
+                // Find and update the opponent's row
+                const opponentRow = rows.findIndex(row => row[0] === challenge.opponent);
+                if (opponentRow !== -1) {
+                    requests.push({
+                        updateCells: {
+                            range: {
+                                sheetId: sheetId,
+                                startRowIndex: opponentRow + 1,
+                                endRowIndex: opponentRow + 2,
+                                startColumnIndex: 5, // Column F (Status)
+                                endColumnIndex: 8 // Through Column H (Opp#)
+                            },
+                            rows: [{
+                                values: [
+                                    { userEnteredValue: { stringValue: 'Available' } },
+                                    { userEnteredValue: { stringValue: '' } },
+                                    { userEnteredValue: { stringValue: '' } }
+                                ]
+                            }],
+                            fields: 'userEnteredValue'
+                        }
                     });
                 }
 
-                embed.setFooter({ text: 'Stay fierce and keep challenging! 💪⚔️' })
+                // Store challenge details for the embed message
+                nullifiedChallenges.push({
+                    player: challenge.playerName,
+                    opponent: rows.find(r => r[0] === challenge.opponent)?.[1] || 'Unknown',
+                    date: challenge.challengeDate,
+                    daysPast: Math.floor(challenge.daysDiff)
+                });
+            });
+
+            if (requests.length > 0) {
+                // Execute all updates
+                await sheets.spreadsheets.batchUpdate({
+                    spreadsheetId: SPREADSHEET_ID,
+                    resource: { requests }
+                });
+
+                // Create embed message
+                const embed = new EmbedBuilder()
+                    .setTitle('🛡️ Nullified Old Challenges 🛡️')
+                    .setDescription(`✨ Success! Nullified ${nullifiedChallenges.length} challenge pairs older than 3 days! ✨`)
+                    .setColor(0x00AE86)
                     .setTimestamp();
+
+                // Add nullified challenges details
+                if (nullifiedChallenges.length > 0) {
+                    const challengesList = nullifiedChallenges
+                        .map(c => `${c.player} vs ${c.opponent} (${c.date}) - ${c.daysPast} days old`)
+                        .join('\n');
+                    
+                    if (challengesList.length <= 1024) {
+                        embed.addFields({
+                            name: 'Nullified Challenges',
+                            value: challengesList
+                        });
+                    } else {
+                        // Split into multiple fields if too long
+                        const chunks = challengesList.match(/.{1,1024}/g) || [];
+                        chunks.forEach((chunk, index) => {
+                            embed.addFields({
+                                name: index === 0 ? 'Nullified Challenges' : '⠀', // Empty character for subsequent fields
+                                value: chunk
+                            });
+                        });
+                    }
+                }
+
+                embed.setFooter({ 
+                    text: 'Challenges nullified successfully! Players can now issue new challenges.',
+                    iconURL: interaction.client.user.displayAvatarURL()
+                });
 
                 // Send the public embed message
                 await interaction.channel.send({ embeds: [embed] });
 
                 // Update the deferred reply
                 await interaction.editReply({ 
-                    content: `Successfully nullified ${Math.floor(nullifiedPairs / 2)} challenge pairs.`
+                    content: `Successfully nullified ${nullifiedChallenges.length} challenge pairs.` 
                 });
             } else {
                 await interaction.editReply({ 
@@ -154,19 +218,9 @@ module.exports = {
 
         } catch (error) {
             console.error('Error nullifying old challenges:', error);
-
-            // Try to send error messages
-            try {
-                await interaction.channel.send({
-                    content: 'An error occurred while nullifying old challenges. Please try again later.'
-                });
-
-                await interaction.editReply({
-                    content: 'An error occurred while processing the command. The error has been logged.'
-                });
-            } catch (followUpError) {
-                console.error('Error sending error messages:', followUpError);
-            }
+            await interaction.editReply({
+                content: 'An error occurred while processing the command. Please try again later.'
+            });
         }
     },
 };
