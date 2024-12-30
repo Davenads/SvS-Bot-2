@@ -3,7 +3,6 @@ const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
 const { logError } = require('../logger');
 
-// Initialize the Google Sheets API client
 const sheets = google.sheets({
   version: 'v4',
   auth: new google.auth.JWT(
@@ -17,9 +16,8 @@ const sheets = google.sheets({
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const MAIN_SHEET = 'SvS Ladder';
 const VACATION_SHEET = 'Extended Vacation';
-const sheetId = 0; // SvS Ladder tab
+const sheetId = 0;
 
-// Emoji mappings
 const elementEmojis = {
   Fire: '🔥',
   Light: '⚡',
@@ -51,14 +49,37 @@ module.exports = {
         .setName('player_name')
         .setDescription('The name of the player to insert')
         .setRequired(true)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName('rank')
-        .setDescription('The rank to insert the player at')
-        .setRequired(true)
-        .setMinValue(1)
+        .setAutocomplete(true)
     ),
+
+  async autocomplete(interaction) {
+    const focusedValue = interaction.options.getFocused().toLowerCase();
+
+    try {
+      const result = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${VACATION_SHEET}!A2:E`
+      });
+
+      const rows = result.data.values || [];
+      const players = rows
+        .filter(row => row[1] && row[4])
+        .map(row => ({
+          name: `${row[4]} (${row[1]})`,
+          value: row[1]
+        }))
+        .filter(choice => 
+          choice.name.toLowerCase().includes(focusedValue) || 
+          choice.value.toLowerCase().includes(focusedValue)
+        )
+        .slice(0, 25);
+
+      await interaction.respond(players);
+    } catch (error) {
+      console.error('Error fetching autocomplete options:', error);
+      await interaction.respond([]);
+    }
+  },
 
   async execute(interaction) {
     console.log(`\n[${new Date().toISOString()}] Insert Command`);
@@ -66,10 +87,8 @@ module.exports = {
 
     await interaction.deferReply({ ephemeral: true });
 
-    // Check if the user has the '@SvS Manager' role
-    const managerRole = interaction.guild.roles.cache.find(
-      role => role.name === 'SvS Manager'
-    );
+    // Check manager role
+    const managerRole = interaction.guild.roles.cache.find(role => role.name === 'SvS Manager');
     if (!managerRole || !interaction.member.roles.cache.has(managerRole.id)) {
       return interaction.editReply({
         content: 'You do not have the required @SvS Manager role to use this command.',
@@ -79,9 +98,8 @@ module.exports = {
 
     try {
       const playerName = interaction.options.getString('player_name');
-      const insertRank = interaction.options.getInteger('rank');
 
-      // Fetch data from both sheets
+      // Fetch both sheets data in parallel
       const [mainResult, vacationResult] = await Promise.all([
         sheets.spreadsheets.values.get({
           spreadsheetId: SPREADSHEET_ID,
@@ -96,46 +114,40 @@ module.exports = {
       const mainRows = mainResult.data.values || [];
       const vacationRows = vacationResult.data.values || [];
 
-      // Find the player in extended vacation
+      // Find player in vacation sheet
       const playerRow = vacationRows.find(row => row[1] && row[1].toLowerCase() === playerName.toLowerCase());
       if (!playerRow) {
+        return interaction.editReply({ content: 'Player not found in Extended Vacation list.' });
+      }
+
+      const originalRank = parseInt(playerRow[0]);
+      if (!originalRank) {
+        return interaction.editReply({ content: 'Could not determine player\'s original rank.' });
+      }
+
+      // Determine insert position
+      const targetRank = originalRank;
+      const playerAtRank = mainRows.find(row => parseInt(row[0]) === targetRank);
+      const playerBelowRank = mainRows.find(row => parseInt(row[0]) === targetRank + 1);
+
+      let insertRank, opponentRank;
+      if (playerAtRank && playerAtRank[5] === 'Available') {
+        insertRank = targetRank + 1;
+        opponentRank = targetRank;
+      } else if (playerBelowRank && playerBelowRank[5] === 'Available') {
+        insertRank = targetRank + 2;
+        opponentRank = targetRank + 1;
+      } else {
         return interaction.editReply({
-          content: 'Player not found in Extended Vacation list.',
-          ephemeral: true
+          content: 'Cannot insert player. Both the target rank and the rank below are in challenges.'
         });
       }
 
-      // Check if the insert rank exists in the main ladder
-      if (insertRank > mainRows.length + 1) {
-        return interaction.editReply({
-          content: 'Invalid rank. The specified rank is beyond the current ladder size.',
-          ephemeral: true
-        });
-      }
-
-      // Find player at insert rank and rank below
-      const playerAtRank = mainRows.find(row => parseInt(row[0]) === insertRank);
-      const playerBelowRank = mainRows.find(row => parseInt(row[0]) === insertRank + 1);
-
-      // Check if both ranks are in challenges
-      if (playerAtRank && playerBelowRank && 
-          playerAtRank[5] === 'Challenge' && playerBelowRank[5] === 'Challenge') {
-        return interaction.editReply({
-          content: 'Cannot insert at this rank. Both the target rank and the rank below are already in challenges.',
-          ephemeral: true
-        });
-      }
-
-      console.log('├─ Inserting Player:');
-      console.log(`│  ├─ Name: ${playerName}`);
-      console.log(`│  └─ Target Rank: #${insertRank}`);
-
-      // Prepare player data for insertion
+      // Prepare player data
       const insertedPlayerData = [...playerRow];
-      insertedPlayerData[0] = insertRank.toString(); // Set new rank
-      insertedPlayerData[5] = 'Challenge'; // Set status to Challenge
-
-      const challengeDate = new Date().toLocaleString('en-US', {
+      insertedPlayerData[0] = insertRank.toString();
+      insertedPlayerData[5] = 'Challenge';
+      insertedPlayerData[6] = new Date().toLocaleString('en-US', {
         month: 'numeric',
         day: 'numeric',
         hour: 'numeric',
@@ -144,22 +156,10 @@ module.exports = {
         timeZone: 'America/New_York',
         timeZoneName: 'short'
       });
-      insertedPlayerData[6] = challengeDate; // Set challenge date
+      insertedPlayerData[7] = opponentRank.toString();
 
-      // Determine opponent based on availability
-      let opponentRank;
-      if (!playerAtRank || playerAtRank[5] === 'Available') {
-        opponentRank = insertRank;
-      } else if (!playerBelowRank || playerBelowRank[5] === 'Available') {
-        opponentRank = insertRank + 1;
-      }
-
-      insertedPlayerData[7] = opponentRank.toString(); // Set opponent rank
-
-      const requests = [];
-
-      // 1. Insert the new row
-      requests.push({
+      // Prepare batch update
+      const requests = [{
         insertDimension: {
           range: {
             sheetId: sheetId,
@@ -167,145 +167,115 @@ module.exports = {
             startIndex: insertRank - 1,
             endIndex: insertRank
           },
-          inheritFromBefore: false
+          inheritFromBefore: true
         }
+      }];
+
+      // Base cell format for all cells
+      const baseCellFormat = {
+        verticalAlignment: 'MIDDLE',
+        wrapStrategy: 'WRAP',
+        backgroundColor: { red: 0.949, green: 0.949, blue: 0.949 },
+        borders: {
+          top: { style: 'SOLID', color: { red: 0.8, green: 0.8, blue: 0.8 } },
+          bottom: { style: 'SOLID', color: { red: 0.8, green: 0.8, blue: 0.8 } },
+          left: { style: 'SOLID', color: { red: 0.8, green: 0.8, blue: 0.8 } },
+          right: { style: 'SOLID', color: { red: 0.8, green: 0.8, blue: 0.8 } }
+        }
+      };
+
+      // Update inserted row and affected rows in one batch
+      const rowUpdates = [];
+      
+      // Insert new row
+      rowUpdates.push({
+        range: {
+          sheetId: sheetId,
+          startRowIndex: insertRank - 1,
+          endRowIndex: insertRank,
+          startColumnIndex: 0,
+          endColumnIndex: 11
+        },
+        rows: [{
+          values: insertedPlayerData.map((value, index) => ({
+            userEnteredValue: { stringValue: value?.toString() || '' },
+            userEnteredFormat: {
+              ...baseCellFormat,
+              horizontalAlignment: index === 0 || index === 7 ? 'RIGHT' : 'LEFT',
+              textFormat: {
+                fontSize: index === 0 ? 12 : 10,
+                bold: index === 1 || index === 3 || index === 4
+              },
+              backgroundColor: index === 3 ? (
+                value === 'Cold' ? { red: 0.5, green: 0.635, blue: 1 } :
+                value === 'Fire' ? { red: 0.976, green: 0.588, blue: 0.51 } :
+                { red: 1, green: 0.929, blue: 0.686 }
+              ) : baseCellFormat.backgroundColor
+            }
+          }))
+        }]
       });
 
-      // 2. Update the inserted row with proper formatting
-      requests.push({
-        updateCells: {
+      // Update subsequent rows
+      const affectedRows = mainRows.slice(insertRank - 1);
+      if (affectedRows.length > 0) {
+        const bulkUpdate = {
           range: {
             sheetId: sheetId,
-            startRowIndex: insertRank - 1,
-            endRowIndex: insertRank,
+            startRowIndex: insertRank,
+            endRowIndex: insertRank + affectedRows.length,
             startColumnIndex: 0,
             endColumnIndex: 11
           },
-          rows: [{
-            values: insertedPlayerData.map((value, index) => ({
-              userEnteredValue: { stringValue: value?.toString() || '' },
+          rows: affectedRows.map((row, idx) => ({
+            values: row.map((value, colIdx) => ({
+              userEnteredValue: { 
+                stringValue: colIdx === 0 ? (insertRank + idx + 1).toString() : value?.toString() || '' 
+              },
               userEnteredFormat: {
-                horizontalAlignment: index === 0 ? 'RIGHT' : 'LEFT',
-                textFormat: { bold: index === 1 }
+                ...baseCellFormat,
+                horizontalAlignment: colIdx === 0 || colIdx === 7 ? 'RIGHT' : 'LEFT',
+                textFormat: {
+                  fontSize: colIdx === 0 ? 12 : 10,
+                  bold: colIdx === 1 || colIdx === 3 || colIdx === 4
+                },
+                backgroundColor: colIdx === 3 ? (
+                  value === 'Cold' ? { red: 0.5, green: 0.635, blue: 1 } :
+                  value === 'Fire' ? { red: 0.976, green: 0.588, blue: 0.51 } :
+                  { red: 1, green: 0.929, blue: 0.686 }
+                ) : baseCellFormat.backgroundColor
               }
             }))
-          }],
+          }))
+        };
+        rowUpdates.push(bulkUpdate);
+      }
+
+      // Add all row updates to requests
+      requests.push(...rowUpdates.map(update => ({
+        updateCells: {
+          ...update,
           fields: 'userEnteredValue,userEnteredFormat'
         }
-      });
+      })));
 
-      // 3. Set element column background color
-      requests.push({
-        updateCells: {
-          range: {
-            sheetId: sheetId,
-            startRowIndex: insertRank - 1,
-            endRowIndex: insertRank,
-            startColumnIndex: 3,
-            endColumnIndex: 4
-          },
-          rows: [{
-            values: [{
-              userEnteredFormat: {
-                backgroundColor: playerRow[3] === 'Cold' ? { red: 0.5, green: 0.635, blue: 1 } :
-                                playerRow[3] === 'Fire' ? { red: 0.976, green: 0.588, blue: 0.51 } :
-                                { red: 1, green: 0.929, blue: 0.686 }
-              }
-            }]
-          }],
-          fields: 'userEnteredFormat.backgroundColor'
-        }
-      });
-
-      // 4. Update ranks and opponent references for all affected rows
-      for (let i = insertRank; i < mainRows.length + 1; i++) {
-        const currentRow = mainRows[i - 1];
-        if (!currentRow) continue;
-
-        // Update rank
-        requests.push({
-          updateCells: {
-            range: {
-              sheetId: sheetId,
-              startRowIndex: i,
-              endRowIndex: i + 1,
-              startColumnIndex: 0,
-              endColumnIndex: 1
-            },
-            rows: [{
-              values: [{
-                userEnteredValue: { stringValue: (i + 1).toString() },
-                userEnteredFormat: { horizontalAlignment: 'RIGHT' }
-              }]
-            }],
-            fields: 'userEnteredValue,userEnteredFormat'
-          }
-        });
-
-        // Update opponent references if in a challenge
-        if (currentRow[5] === 'Challenge' && currentRow[7]) {
-          const oppRank = parseInt(currentRow[7]);
-          if (oppRank >= insertRank) {
-            requests.push({
-              updateCells: {
-                range: {
-                  sheetId: sheetId,
-                  startRowIndex: i,
-                  endRowIndex: i + 1,
-                  startColumnIndex: 7,
-                  endColumnIndex: 8
-                },
-                rows: [{
-                  values: [{
-                    userEnteredValue: { stringValue: (oppRank + 1).toString() },
-                    userEnteredFormat: { horizontalAlignment: 'RIGHT' }
-                  }]
-                }],
-                fields: 'userEnteredValue,userEnteredFormat'
-              }
-            });
-          }
-        }
-      }
-
-      // 5. Update opponent's challenge status
-      if (opponentRank) {
-        const opponentRowIndex = opponentRank - 1;
-        requests.push({
-          updateCells: {
-            range: {
-              sheetId: sheetId,
-              startRowIndex: opponentRowIndex,
-              endRowIndex: opponentRowIndex + 1,
-              startColumnIndex: 5,
-              endColumnIndex: 8
-            },
-            rows: [{
-              values: [
-                { userEnteredValue: { stringValue: 'Challenge' } },
-                { userEnteredValue: { stringValue: challengeDate } },
-                { userEnteredValue: { stringValue: insertRank.toString() } }
-              ]
-            }],
-            fields: 'userEnteredValue'
-          }
-        });
-      }
-
-      // Execute all updates
+      // Execute batch update
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId: SPREADSHEET_ID,
         resource: { requests }
       });
 
-      // Remove player from Extended Vacation
-      const vacationRowIndex = vacationRows.findIndex(row => row[1] && row[1].toLowerCase() === playerName.toLowerCase()) + 2;
+      // Remove from vacation sheet
+      const vacationRowIndex = vacationRows.findIndex(row => 
+        row[1] && row[1].toLowerCase() === playerName.toLowerCase()
+      ) + 2;
+      
       await sheets.spreadsheets.values.clear({
         spreadsheetId: SPREADSHEET_ID,
         range: `${VACATION_SHEET}!A${vacationRowIndex}:K${vacationRowIndex}`
       });
 
-      // Create welcome back embed
+      // Create and send welcome embed
       const welcomeEmbed = new EmbedBuilder()
         .setColor('#4CAF50')
         .setTitle('🎉 Welcome Back to the Ladder!')
@@ -338,10 +308,7 @@ module.exports = {
         })
         .setTimestamp();
 
-      // Send the embed to the channel
       await interaction.channel.send({ embeds: [welcomeEmbed] });
-
-      // Send confirmation to command issuer
       await interaction.editReply({
         content: `Successfully inserted ${playerName} at rank ${insertRank} and updated all affected rankings and challenges.`,
         ephemeral: true

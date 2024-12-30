@@ -2,9 +2,10 @@
 require('dotenv').config();
 
 // Import necessary modules
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const credentials = require('../config/credentials.json');
+const { logError } = require('../logger');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -20,16 +21,38 @@ const sheets = google.sheets({
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
 
+// Emoji and color mappings for visual enhancement
 const elementEmojis = {
     'Fire': '🔥',
     'Light': '⚡',
     'Cold': '❄️'
 };
 
+const specEmojis = {
+    'Vita': '❤️',
+    'ES': '🟠'
+};
+
 const elementColors = {
     'Fire': { red: 0.976, green: 0.588, blue: 0.510 }, // #f99682
     'Light': { red: 1, green: 0.925, blue: 0.682 },   // #ffecae
     'Cold': { red: 0.498, green: 0.631, blue: 1 }     // #7fa1ff
+};
+
+// Victory messages for different scenarios
+const victoryMessages = {
+    defense: [
+        "defended their position with unwavering resolve! 🛡️",
+        "stood their ground magnificently! ⚔️",
+        "proved why they earned their rank! 🏆",
+        "successfully protected their standing! 🛡️"
+    ],
+    climb: [
+        "climbed the ranks with an impressive victory! 🏔️",
+        "proved their worth and ascended! ⚡",
+        "showed they deserve a higher position! 🌟",
+        "conquered new heights in the ladder! 🎯"
+    ]
 };
 
 module.exports = {
@@ -46,107 +69,109 @@ module.exports = {
                 .setRequired(true)),
     
     async execute(interaction) {
+        console.log(`\n[${new Date().toISOString()}] Report Win Command`);
+        console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
+        
         const winnerRank = interaction.options.getInteger('winner_rank');
         const loserRank = interaction.options.getInteger('loser_rank');
-        const userId = interaction.user.id;
+        
+        console.log(`├─ Winner Rank: ${winnerRank}`);
+        console.log(`├─ Loser Rank: ${loserRank}`);
 
-        // Log command invocation details
-        console.log(`[${new Date().toISOString()}] Command invoked: /reportwin by ${interaction.user.tag} (${interaction.user.id}), Interaction ID: ${interaction.id}`);
-
-        let deferred = false;
-
-        const deferIfNecessary = async () => {
-            if (!deferred) {
-                await interaction.deferReply({ ephemeral: true });
-                console.log(`[${new Date().toISOString()}] Interaction deferred to allow more processing time.`);
-                deferred = true;
-            }
-        };
+        await interaction.deferReply({ ephemeral: true });
 
         try {
-            // Defer the reply to avoid delays and allow more processing time
-            await deferIfNecessary();
-
-            // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
-            console.log(`[${new Date().toISOString()}] Fetching data from Google Sheets for reporting win...`);
+            // Fetch data from the Google Sheet
+            console.log('├─ Fetching data from Google Sheets...');
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:K`,  // Fetch columns A to K
+                range: `SvS Ladder!A2:K`,
             });
 
             const rows = result.data.values;
-            if (!rows || !rows.length) {
-                console.log(`[${new Date().toISOString()}] No data available on the leaderboard.`);
-                await deferIfNecessary();
+            if (!rows?.length) {
+                console.log('└─ Error: No data found in leaderboard');
                 return interaction.editReply({ content: 'No data available on the leaderboard.' });
             }
 
-            // Find the winner and loser rows based on rank
+            // Find the winner and loser rows
             const winnerRow = rows.find(row => parseInt(row[0]) === winnerRank);
             const loserRow = rows.find(row => parseInt(row[0]) === loserRank);
 
             if (!winnerRow || !loserRow) {
-                console.log(`[${new Date().toISOString()}] Invalid ranks provided: Winner Rank - ${winnerRank}, Loser Rank - ${loserRank}`);
-                await deferIfNecessary();
+                console.log('└─ Error: Invalid ranks provided');
                 return interaction.editReply({ content: 'Invalid ranks provided.' });
             }
 
-            const winnerDiscordId = winnerRow[8]; // Discord user ID of the winner
-            const loserDiscordId = loserRow[8]; // Discord user ID of the loser
+            // Permission check
+            const userId = interaction.user.id;
+            const winnerDiscordId = winnerRow[8];
+            const loserDiscordId = loserRow[8];
+            const hasPermission = userId === winnerDiscordId || 
+                                userId === loserDiscordId || 
+                                interaction.member.roles.cache.some(role => role.name === 'SvS Manager');
 
-            // Check if the user is allowed to execute this command
-            if (userId !== winnerDiscordId && userId !== loserDiscordId && !interaction.member.roles.cache.some(role => role.name === 'SvS Manager')) {
-                console.log(`[${new Date().toISOString()}] User (${interaction.user.tag}) does not have permission to report this result.`);
-                await deferIfNecessary();
-                return interaction.editReply({ content: 'You do not have permission to report this challenge result.' });
+            if (!hasPermission) {
+                console.log('└─ Error: User lacks permission');
+                return interaction.editReply({ 
+                    content: 'You do not have permission to report this challenge result.' 
+                });
             }
 
-            const winnerDiscordName = winnerRow[4]; // Discord name of the winner
-            const loserDiscordName = loserRow[4]; // Discord name of the loser
-            const winnerElement = winnerRow[3]; // Element of the winner
-            const loserElement = loserRow[3]; // Element of the loser
-            const winnerEmoji = elementEmojis[winnerElement] || '';
-            const loserEmoji = elementEmojis[loserElement] || '';
+            console.log('├─ Processing match result...');
+
+            // Store player details
+            const winnerDetails = {
+                name: winnerRow[1],
+                discordName: winnerRow[4],
+                element: winnerRow[3],
+                spec: winnerRow[2]
+            };
+
+            const loserDetails = {
+                name: loserRow[1],
+                discordName: loserRow[4],
+                element: loserRow[3],
+                spec: loserRow[2]
+            };
+
+            const isDefense = winnerRank < loserRank;
+            console.log(`├─ Match Type: ${isDefense ? 'Defense' : 'Climb'}`);
+
+            // Prepare row updates
+            let updatedWinnerRow = [...winnerRow];
+            let updatedLoserRow = [...loserRow];
+
+            if (!isDefense) {
+                // Swap rows for climb victory
+                console.log('├─ Performing rank swap...');
+                updatedWinnerRow = [...loserRow];
+                updatedWinnerRow[0] = String(winnerRow[0]);
+                
+                updatedLoserRow = [...winnerRow];
+                updatedLoserRow[0] = String(loserRow[0]);
+
+                // Swap Notes and Cooldown
+                [updatedWinnerRow[9], updatedLoserRow[9]] = [loserRow[9], winnerRow[9]];
+                [updatedWinnerRow[10], updatedLoserRow[10]] = [loserRow[10], winnerRow[10]];
+            } else {
+                updatedWinnerRow[0] = String(updatedWinnerRow[0]);
+                updatedLoserRow[0] = String(updatedLoserRow[0]);
+            }
+
+            // Reset challenge status
+            updatedWinnerRow[5] = 'Available';
+            updatedWinnerRow[6] = '';
+            updatedWinnerRow[7] = '';
+            updatedLoserRow[5] = 'Available';
+            updatedLoserRow[6] = '';
+            updatedLoserRow[7] = '';
 
             const winnerRowIndex = rows.findIndex(row => parseInt(row[0]) === winnerRank) + 2;
             const loserRowIndex = rows.findIndex(row => parseInt(row[0]) === loserRank) + 2;
 
-            let updatedWinnerRow = [...winnerRow];
-            let updatedLoserRow = [...loserRow];
-
-            if (winnerRank > loserRank) {
-                // Swap rows if the winner has a worse rank (higher number)
-                console.log(`[${new Date().toISOString()}] Swapping ranks: Winner Rank - ${winnerRank}, Loser Rank - ${loserRank}`);
-                updatedWinnerRow = [...loserRow];
-                updatedWinnerRow[0] = String(winnerRow[0]); // Keep the original rank (Column A)
-                
-                updatedLoserRow = [...winnerRow];
-                updatedLoserRow[0] = String(loserRow[0]); // Keep the original rank (Column A)
-
-                // Swap Notes (Column J) and Cooldown (Column K)
-                [updatedWinnerRow[9], updatedLoserRow[9]] = [loserRow[9], winnerRow[9]]; // Swap Notes
-                [updatedWinnerRow[10], updatedLoserRow[10]] = [loserRow[10], winnerRow[10]]; // Swap Cooldown
-            } else {
-                updatedWinnerRow[0] = String(updatedWinnerRow[0]);
-                updatedLoserRow[0] = String(updatedLoserRow[0]);
-                
-                // Ensure Notes and Cooldown remain consistent if no swap is needed
-                updatedWinnerRow[9] = winnerRow[9];
-                updatedWinnerRow[10] = winnerRow[10];
-                updatedLoserRow[9] = loserRow[9];
-                updatedLoserRow[10] = loserRow[10];
-            }
-
-            // Set status to 'Available' and clear challenge-specific columns
-            updatedWinnerRow[5] = 'Available'; // Set status to 'Available'
-            updatedWinnerRow[6] = ''; // Clear cDate
-            updatedWinnerRow[7] = ''; // Clear Opp#
-            updatedLoserRow[5] = 'Available'; // Set status to 'Available'
-            updatedLoserRow[6] = ''; // Clear cDate
-            updatedLoserRow[7] = ''; // Clear Opp#
-
-            // Create a batchUpdate request to update the rows with new values
-            console.log(`[${new Date().toISOString()}] Updating Google Sheets with new values for ranks: Winner Rank - ${winnerRank}, Loser Rank - ${loserRank}`);
+            // Create update requests
+            console.log('├─ Preparing update requests...');
             const requests = [
                 {
                     updateCells: {
@@ -155,16 +180,14 @@ module.exports = {
                             startRowIndex: winnerRowIndex - 1,
                             endRowIndex: winnerRowIndex,
                             startColumnIndex: 0,
-                            endColumnIndex: 11  // Columns A to K
+                            endColumnIndex: 11
                         },
-                        rows: [
-                            {
-                                values: updatedWinnerRow.map((cellValue, index) => ({
-                                    userEnteredValue: { stringValue: cellValue },
-                                    userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {} // Ensure right alignment for Column A
-                                }))
-                            }
-                        ],
+                        rows: [{
+                            values: updatedWinnerRow.map((cellValue, index) => ({
+                                userEnteredValue: { stringValue: cellValue },
+                                userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {}
+                            }))
+                        }],
                         fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
                     }
                 },
@@ -175,33 +198,20 @@ module.exports = {
                             startRowIndex: loserRowIndex - 1,
                             endRowIndex: loserRowIndex,
                             startColumnIndex: 0,
-                            endColumnIndex: 11  // Columns A to K
+                            endColumnIndex: 11
                         },
-                        rows: [
-                            {
-                                values: updatedLoserRow.map((cellValue, index) => ({
-                                    userEnteredValue: { stringValue: cellValue },
-                                    userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {} // Ensure right alignment for Column A
-                                }))
-                            }
-                        ],
+                        rows: [{
+                            values: updatedLoserRow.map((cellValue, index) => ({
+                                userEnteredValue: { stringValue: cellValue },
+                                userEnteredFormat: index === 0 ? { horizontalAlignment: 'RIGHT' } : {}
+                            }))
+                        }],
                         fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
                     }
                 }
             ];
 
-            // Execute the batchUpdate request to update rows
-            await deferIfNecessary();
-            await sheets.spreadsheets.batchUpdate({
-                spreadsheetId: SPREADSHEET_ID,
-                resource: {
-                    requests
-                }
-            });
-
-            console.log(`[${new Date().toISOString()}] Successfully updated Google Sheets with challenge results.`);
-
-            // Manually assign colors to the element column after the swap
+            // Add element color updates
             const elementUpdateRequests = [
                 {
                     updateCells: {
@@ -209,20 +219,16 @@ module.exports = {
                             sheetId: sheetId,
                             startRowIndex: winnerRowIndex - 1,
                             endRowIndex: winnerRowIndex,
-                            startColumnIndex: 3, // Column D (Element)
+                            startColumnIndex: 3,
                             endColumnIndex: 4
                         },
-                        rows: [
-                            {
-                                values: [
-                                    {
-                                        userEnteredFormat: {
-                                            backgroundColor: elementColors[updatedWinnerRow[3]]
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
+                        rows: [{
+                            values: [{
+                                userEnteredFormat: {
+                                    backgroundColor: elementColors[updatedWinnerRow[3]]
+                                }
+                            }]
+                        }],
                         fields: 'userEnteredFormat.backgroundColor'
                     }
                 },
@@ -232,62 +238,81 @@ module.exports = {
                             sheetId: sheetId,
                             startRowIndex: loserRowIndex - 1,
                             endRowIndex: loserRowIndex,
-                            startColumnIndex: 3, // Column D (Element)
+                            startColumnIndex: 3,
                             endColumnIndex: 4
                         },
-                        rows: [
-                            {
-                                values: [
-                                    {
-                                        userEnteredFormat: {
-                                            backgroundColor: elementColors[updatedLoserRow[3]]
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
+                        rows: [{
+                            values: [{
+                                userEnteredFormat: {
+                                    backgroundColor: elementColors[updatedLoserRow[3]]
+                                }
+                            }]
+                        }],
                         fields: 'userEnteredFormat.backgroundColor'
                     }
                 }
             ];
 
-            // Execute the batchUpdate request to update element colors
-            await deferIfNecessary();
+            // Execute updates
+            console.log('├─ Executing sheet updates...');
             await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: SPREADSHEET_ID,
-                resource: {
-                    requests: elementUpdateRequests
-                }
+                resource: { requests: [...requests, ...elementUpdateRequests] }
             });
 
-            console.log(`[${new Date().toISOString()}] Successfully updated element colors in Google Sheets.`);
+            // Create result announcement embed
+            const victoryMessage = isDefense 
+                ? victoryMessages.defense[Math.floor(Math.random() * victoryMessages.defense.length)]
+                : victoryMessages.climb[Math.floor(Math.random() * victoryMessages.climb.length)];
 
-            // Create an embed message to announce the result
-            const embed = new EmbedBuilder()
-                .setTitle('🔥 SvS Challenge Result Reported ⚔️')
-                .setDescription(`The challenge result has been successfully reported!
-
-**Winner Rank:** #${winnerRank} (${winnerDiscordName}) ${winnerEmoji}
-**Loser Rank:** #${loserRank} (${loserDiscordName}) ${loserEmoji}
-
-${winnerRank > loserRank ? '🏆 The ranks have been swapped between the winner and loser.' : '🎉 No rank swap was needed.'}`)
+            const resultEmbed = new EmbedBuilder()
                 .setColor(0xFFA500)
-                .setThumbnail('https://example.com/svs_logo.png') // Example URL for SvS flair
-                .setFooter({ text: 'SvS Ladder Bot - Stay Fierce!' })
+                .setTitle('⚔️ Challenge Result Announced! ⚔️')
+                .setDescription(`**${winnerDetails.name}** ${victoryMessage}`)
+                .addFields(
+                    {
+                        name: `${isDefense ? '🛡️ Defender' : '🏆 Victor'} (Rank #${winnerRank})`,
+                        value: `**${winnerDetails.name}**
+${specEmojis[winnerDetails.spec]} ${winnerDetails.spec} ${elementEmojis[winnerDetails.element]}
+<@${winnerDiscordId}>`,
+                        inline: true
+                    },
+                    {
+                        name: '⚔️',
+                        value: 'VS',
+                        inline: true
+                    },
+                    {
+                        name: `${isDefense ? '⚔️ Challenger' : '📉 Defeated'} (Rank #${loserRank})`,
+                        value: `**${loserDetails.name}**
+${specEmojis[loserDetails.spec]} ${loserDetails.spec} ${elementEmojis[loserDetails.element]}
+<@${loserDiscordId}>`,
+                        inline: true
+                    }
+                )
+                .setFooter({ 
+                    text: `${isDefense ? 'Rank Successfully Defended!' : 'Ranks have been updated!'}`,
+                    iconURL: interaction.client.user.displayAvatarURL()
+                })
                 .setTimestamp();
 
-            // Send the embed message
-            await deferIfNecessary();
-            await interaction.followUp({ embeds: [embed] });
+            // Send result to channel
+            await interaction.channel.send({ embeds: [resultEmbed] });
+            
+            // Confirm to command user
+            await interaction.editReply({ 
+                content: `Successfully reported the match result! ${isDefense ? 'Defender maintained their position.' : 'Ranks have been swapped.'}` 
+            });
 
-            console.log(`[${new Date().toISOString()}] Challenge result embed sent to channel.`);
+            console.log('└─ Command completed successfully');
 
         } catch (error) {
-            console.error(`[${new Date().toISOString()}] Error reporting match result (Interaction ID: ${interaction.id}):`, error);
-
-            // Public error message
-            await deferIfNecessary();
-            await interaction.followUp('An error occurred while reporting the match result. Please try again later.');
+            console.error(`└─ Error: ${error.message}`);
+            logError(`Error in reportwin command: ${error.message}\nStack: ${error.stack}`);
+            
+            await interaction.editReply({ 
+                content: 'An error occurred while reporting the match result. Please try again later.' 
+            });
         }
     },
 };
