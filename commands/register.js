@@ -93,7 +93,7 @@ module.exports = {
     },
 
     async execute(interaction) {
-        await interaction.deferReply({ ephemeral: true }); // Defer the reply to prevent timeout issues
+        await interaction.deferReply(); // Defer the reply to prevent timeout issues
 
         // Check if the user has the '@SvS Manager' role
         const managerRole = interaction.guild.roles.cache.find(role => role.name === 'SvS Manager');

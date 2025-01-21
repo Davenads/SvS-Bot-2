@@ -31,7 +31,7 @@ const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
             console.log('Successfully reloaded application (/) commands for the test guild.');
         }
 
-        // Deploy to live server (Diablo Dueling Leagues)
+        // Deploy to live server (D2RPvPLeague)
         if (process.env.LIVE_GUILD_ID) {
             await rest.put(
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.LIVE_GUILD_ID),
