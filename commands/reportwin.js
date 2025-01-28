@@ -69,6 +69,13 @@ module.exports = {
                 .setRequired(true)),
     
     async execute(interaction) {
+        if (interaction.channelId !== '1330563945341390959') {
+            return await interaction.reply({ 
+              content: 'This command can only be used in the #challenges channel.',
+              ephemeral: true 
+            });
+          }
+          await interaction.deferReply({ ephemeral: true });
         console.log(`\n[${new Date().toISOString()}] Report Win Command`);
         console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
         
