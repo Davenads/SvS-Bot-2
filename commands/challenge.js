@@ -52,6 +52,13 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    if (interaction.channelId !== '1330563945341390959') {
+      return await interaction.reply({ 
+        content: 'This command can only be used in the #challenges channel.',
+        ephemeral: true 
+      });
+    }
+    await interaction.deferReply({ ephemeral: true });
     const timestamp = new Date().toISOString();
     console.log(`\n[${timestamp}] Challenge Command Execution Started`);
     console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
