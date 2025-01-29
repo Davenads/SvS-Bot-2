@@ -62,9 +62,6 @@ module.exports = {
     const timestamp = new Date().toISOString();
     console.log(`\n[${timestamp}] Challenge Command Execution Started`);
     console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
-
-    await interaction.deferReply({ ephemeral: true });
-
     try {
       const challengerRank = interaction.options.getInteger('challenger_rank');
       const targetRank = interaction.options.getInteger('target_rank');
