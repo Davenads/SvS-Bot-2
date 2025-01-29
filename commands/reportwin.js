@@ -75,7 +75,7 @@ module.exports = {
               ephemeral: true 
             });
           }
-          await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ ephemeral: true });
         console.log(`\n[${new Date().toISOString()}] Report Win Command`);
         console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
         
@@ -83,10 +83,7 @@ module.exports = {
         const loserRank = interaction.options.getInteger('loser_rank');
         
         console.log(`├─ Winner Rank: ${winnerRank}`);
-        console.log(`├─ Loser Rank: ${loserRank}`);
-
-        await interaction.deferReply({ ephemeral: true });
-
+        console.log(`├─ Loser Rank: ${loserRank}`)
         try {
             // Fetch data from the Google Sheet
             console.log('├─ Fetching data from Google Sheets...');
