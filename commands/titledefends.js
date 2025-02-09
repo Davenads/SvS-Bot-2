@@ -65,7 +65,7 @@ module.exports = {
                 .filter(row => row[0] && row[2]) // Filter out empty rows
                 .map(row => ({
                     username: row[0],
-                    discordId: row[1],
+                    discordId: row[1] ? row[1].trim() : '', // Handle empty or whitespace-only IDs
                     defends: parseInt(row[2])
                 }))
                 .sort((a, b) => b.defends - a.defends); // Sort by number of defends descending
@@ -78,14 +78,28 @@ module.exports = {
                 const pageDefenders = titleDefends.slice(i, i + ENTRIES_PER_PAGE);
                 let pageText = '';
                 
-                pageDefenders.forEach((defender, index) => {
+                // Process defenders sequentially with await
+                for (const [index, defender] of pageDefenders.entries()) {
                     const position = i + index + 1;
                     const medal = MEDALS[position] || '•';
                     const trophy = position <= 3 ? TROPHIES[Math.floor(Math.random() * TROPHIES.length)] : '';
                     
-                    pageText += `${medal} **#${position}** <@${defender.discordId}>\n`;
+                    // Check if the discordId exists and if the member is in the guild
+                    let memberMention;
+                    try {
+                        if (defender.discordId) {
+                            const member = await interaction.guild.members.fetch(defender.discordId);
+                            memberMention = `<@${defender.discordId}>`;
+                        } else {
+                            throw new Error('No Discord ID provided');
+                        }
+                    } catch (error) {
+                        console.log(`├─ Could not find member for ID ${defender.discordId}, falling back to username: ${defender.username}`);
+                        memberMention = `${defender.username}`;
+                    }
+                    pageText += `${medal} **#${position}** ${memberMention}\n`;
                     pageText += `┗━ ${defender.defends} successful defends ${trophy}\n\n`;
-                });
+                };
 
                 const embed = new EmbedBuilder()
                     .setColor(0xFFD700)
