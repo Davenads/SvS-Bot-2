@@ -269,7 +269,60 @@ module.exports = {
                 ? victoryMessages.defense[Math.floor(Math.random() * victoryMessages.defense.length)]
                 : victoryMessages.climb[Math.floor(Math.random() * victoryMessages.climb.length)];
 
-            const resultEmbed = new EmbedBuilder()
+                // Add this new code block for title defends before the embed creation
+if (winnerRank === 1) {
+    console.log('Processing title defense metrics...');
+    
+    try {
+        // Fetch current metrics data
+        const metricsResult = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'Metrics!A11:C'
+        });
+        
+        const metricsRows = metricsResult.data.values || [];
+        
+        // Find if player already exists
+        const playerRowIndex = metricsRows.findIndex(row => row[1] === winnerRow[8]); // Use winnerRow[8] directly for Discord ID
+        
+        if (playerRowIndex === -1) {
+            // New player - append to the list
+            await sheets.spreadsheets.values.append({
+                spreadsheetId: SPREADSHEET_ID,
+                range: 'Metrics!A11:C',
+                valueInputOption: 'USER_ENTERED',
+                resource: {
+                    values: [[
+                        winnerRow[4],  // Discord Username
+                        winnerRow[8],  // Discord ID
+                        '1'
+                    ]]
+                }
+            });
+            console.log('New title defender added to metrics');
+        } else {
+            // Existing player - update their count
+            const currentDefenses = parseInt(metricsRows[playerRowIndex][2] || '0') + 1;
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `Metrics!A${11 + playerRowIndex}:C${11 + playerRowIndex}`,
+                valueInputOption: 'USER_ENTERED',
+                resource: {
+                    values: [[
+                        winnerRow[4],  // Discord Username
+                        winnerRow[8],  // Discord ID
+                        currentDefenses.toString()
+                    ]]
+                }
+            });
+            console.log('Existing title defender metrics updated');
+        }
+    } catch (error) {
+        console.error('Error updating title defense metrics:', error);
+    }
+}
+            
+                const resultEmbed = new EmbedBuilder()
                 .setColor(0xFFA500)
                 .setTitle('⚔️ Challenge Result Announced! ⚔️')
                 .setDescription(`**${winnerDetails.name}** ${victoryMessage}`)
