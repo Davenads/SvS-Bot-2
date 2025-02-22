@@ -34,6 +34,12 @@ module.exports = {
                         .setRequired(true))),
 
     async execute(interaction) {
+            const timestamp = new Date().toISOString();
+            console.log(`\n[${timestamp}] Cooldown Debug Command`);
+            console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
+            console.log(`├─ Channel: #${interaction.channel.name} (${interaction.channel.id})`);
+            console.log(`├─ Guild: ${interaction.guild.name} (${interaction.guild.id})`);
+            console.log(`├─ Subcommand: ${interaction.options.getSubcommand()}`);
         // Check if user has SvS Manager role
         if (!interaction.member.roles.cache.some(role => role.name === 'SvS Manager')) {
             return interaction.reply({
