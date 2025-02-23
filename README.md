@@ -1,6 +1,6 @@
 # SvS-Bot-2
 
-![SvS League Banner](assets\SvS_D2RPvP1.png)
+![SvS League Banner](.\assets\SvS_D2RPvP1.png)
 
 SvS-Bot-2 is a Discord bot for managing PvP duel leaderboards in the "SvS" community, using Google Sheets as its database.
 
