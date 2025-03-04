@@ -1,19 +1,18 @@
 require('dotenv').config()
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
 const { google } = require('googleapis')
-const credentials = require('../config/credentials.json')
 const { logError } = require('../logger')
 const redisClient = require('../redis-client');
 
 const sheets = google.sheets({
   version: 'v4',
   auth: new google.auth.JWT(
-    credentials.client_email,
+    process.env.GOOGLE_CLIENT_EMAIL,
     null,
-    credentials.private_key,
+    process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     ['https://www.googleapis.com/auth/spreadsheets']
   )
-})
+});
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
 const SHEET_NAME = 'SvS Ladder'

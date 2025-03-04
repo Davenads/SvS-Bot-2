@@ -1,16 +1,15 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
-const credentials = require('../config/credentials.json');
 
 const sheets = google.sheets({
     version: 'v4',
     auth: new google.auth.JWT(
-        credentials.client_email,
-        null,
-        credentials.private_key,
-        ['https://www.googleapis.com/auth/spreadsheets']
+      process.env.GOOGLE_CLIENT_EMAIL,
+      null,
+      process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      ['https://www.googleapis.com/auth/spreadsheets']
     )
-});
+  });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const METRICS_TAB = 'Metrics';
