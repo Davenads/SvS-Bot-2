@@ -1,17 +1,7 @@
 require('dotenv').config();
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { google } = require('googleapis');
-
-const sheets = google.sheets({
-    version: 'v4',
-    auth: new google.auth.JWT(
-      process.env.GOOGLE_CLIENT_EMAIL,
-      null,
-      process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      ['https://www.googleapis.com/auth/spreadsheets']
-    )
-  });
+const sheets = require('../google-sheets-client');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const sheetName = 'Tal Rasha Signups';

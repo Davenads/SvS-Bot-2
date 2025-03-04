@@ -29,17 +29,7 @@ module.exports = {
 
     try {
       // Load the Google Sheet
-      const { google } = require('googleapis');
-
-      const sheets = google.sheets({
-        version: 'v4',
-        auth: new google.auth.JWT(
-          process.env.GOOGLE_CLIENT_EMAIL,
-          null,
-          process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-          ['https://www.googleapis.com/auth/spreadsheets']
-        )
-      });
+      const sheets = require('../google-sheets-client');
       
       const sheetName = 'SvS Ladder';
       console.log('Fetching data from Google Sheets...');

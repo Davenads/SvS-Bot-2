@@ -1,18 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { google } = require('googleapis');
+const sheets = require('../google-sheets-client');
 const moment = require('moment-timezone');  // Use moment-timezone for better timezone handling
 const { logError } = require('../logger');
 
-// Initialize the Google Sheets API client
-const sheets = google.sheets({
-    version: 'v4',
-    auth: new google.auth.JWT(
-      process.env.GOOGLE_CLIENT_EMAIL,
-      null,
-      process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      ['https://www.googleapis.com/auth/spreadsheets']
-    )
-  });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
