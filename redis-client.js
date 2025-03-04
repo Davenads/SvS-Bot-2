@@ -35,7 +35,7 @@ class RedisClient {
 
     async setCooldown(player1, player2) {
         const key = this.generateCooldownKey(player1, player2);
-        const expiryTime = 12 * 60 * 60; // 12 hours in seconds
+        const expiryTime = 24 * 60 * 60; // 12 hours in seconds
         const cooldownData = JSON.stringify({
             player1: {
                 discordId: player1.discordId,
