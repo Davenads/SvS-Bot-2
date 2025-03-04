@@ -7,12 +7,15 @@ class RedisClient {
         this.isRailway = process.env.RAILWAY_ENVIRONMENT === 'production';
         
         // Determine if we're in Railway's environment
+        console.log(`Redis Client Initialization:`);
+        console.log(`- Environment detection: RAILWAY_ENVIRONMENT=${process.env.RAILWAY_ENVIRONMENT}`);
+        console.log(`- Available env vars: REDIS_HOST=${process.env.REDIS_HOST}, REDIS_PORT=${process.env.REDIS_PORT}`);
+        
         const connectionInfo = this.getConnectionInfo();
         
-        console.log(`Redis Client Initialization:`);
-        console.log(`- Environment: ${this.isRailway ? 'Railway' : 'Local'}`);
-        console.log(`- Host: ${connectionInfo.host}`);
-        console.log(`- Port: ${connectionInfo.port}`);
+        console.log(`- Environment resolved as: ${this.isRailway ? 'Railway' : 'Local'}`);
+        console.log(`- Selected host: ${connectionInfo.host}`);
+        console.log(`- Selected port: ${connectionInfo.port}`);
         console.log(`- Password exists: ${Boolean(connectionInfo.password)}`);
         console.log(`- Using internal networking: ${connectionInfo.useInternalNetworking}`);
         
@@ -46,55 +49,46 @@ class RedisClient {
     
     // Helper method to determine connection info based on environment
     getConnectionInfo() {
-        // Railway environment
-        if (this.isRailway) {
-            // First try Railway's internal networking (preferred)
-            if (process.env.RAILWAY_REDIS_INTERNAL_URL) {
-                return {
-                    host: 'redis.railway.internal', // Railway's internal DNS
-                    port: 6379,
-                    password: process.env.REDIS_PASSWORD,
-                    useInternalNetworking: true
-                };
-            }
-            
-            // Then try the proxied domain if available
-            // Railway might provide it as host:port format or as a fully formed URL
-            if (process.env.REDIS_HOST) {
-                // Check if the host contains the Railway proxy domain
-                if (process.env.REDIS_HOST.includes('proxy.rlwy')) {
-                    return {
-                        host: process.env.REDIS_HOST,
-                        port: process.env.REDIS_PORT || 6379,
-                        password: process.env.REDIS_PASSWORD,
-                        useInternalNetworking: false
-                    };
-                }
-                
-                // Handle specific case for your shinkansen.proxy.rlwy.net
-                if (process.env.REDIS_HOST.includes('shinkansen.proxy.rlwy.net')) {
-                    return {
-                        host: 'shinkansen.proxy.rlwy.net',
-                        port: process.env.REDIS_PORT || 51283, // Use the specific port from your screenshot
-                        password: process.env.REDIS_PASSWORD,
-                        useInternalNetworking: false
-                    };
-                }
-            }
-            
-            // Fallback to any provided Redis settings
+        // Force Railway proxy connection for testing
+        console.log('Environment variables for Redis connection:');
+        console.log(`REDIS_HOST: ${process.env.REDIS_HOST || 'not set'}`);
+        console.log(`REDIS_PORT: ${process.env.REDIS_PORT || 'not set'}`);
+        console.log(`REDIS_PASSWORD exists: ${Boolean(process.env.REDIS_PASSWORD)}`);
+        console.log(`RAILWAY_ENVIRONMENT: ${process.env.RAILWAY_ENVIRONMENT || 'not set'}`);
+        
+        // Try direct connection to Railway Redis proxy
+        if (process.env.REDIS_HOST === 'shinkansen.proxy.rlwy.net' || 
+            (process.env.REDIS_HOST && process.env.REDIS_HOST.includes('proxy.rlwy'))) {
+            console.log('Using Railway proxy connection');
             return {
-                host: process.env.REDIS_HOST || 'localhost',
-                port: process.env.REDIS_PORT || 6379,
+                host: process.env.REDIS_HOST,
+                port: parseInt(process.env.REDIS_PORT || '6379'),
                 password: process.env.REDIS_PASSWORD,
                 useInternalNetworking: false
             };
         }
         
-        // Local development
+        // Check if we're in Railway by looking for any Railway-specific env vars
+        if (process.env.RAILWAY_ENVIRONMENT || 
+            process.env.RAILWAY_SERVICE_NAME || 
+            process.env.RAILWAY_STATIC_URL) {
+            console.log('Detected Railway environment but missing direct Redis configs');
+            
+            // Hardcoded fallback to your specific Redis instance from screenshot
+            console.log('Using hardcoded Railway Redis connection');
+            return {
+                host: 'shinkansen.proxy.rlwy.net',
+                port: 51283,
+                password: process.env.REDIS_PASSWORD,
+                useInternalNetworking: false
+            };
+        }
+        
+        // Local development fallback
+        console.log('Falling back to local development Redis connection');
         return {
             host: process.env.REDIS_HOST || 'localhost',
-            port: process.env.REDIS_PORT || 6379,
+            port: parseInt(process.env.REDIS_PORT || '6379'),
             password: process.env.REDIS_PASSWORD,
             useInternalNetworking: false
         };
