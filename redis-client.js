@@ -4,95 +4,83 @@ const { logError } = require('./logger');
 
 class RedisClient {
     constructor() {
-        this.isRailway = process.env.RAILWAY_ENVIRONMENT === 'production';
+        // Debug environment variables related to Redis
+        console.log('=== REDIS CLIENT DEBUG ===');
+        Object.keys(process.env).filter(key => 
+            key.includes('REDIS') || key.includes('SvS') || key.includes('SVS')
+        ).forEach(key => {
+            const value = process.env[key];
+            console.log(`ENV ${key}: ${value ? (value.length > 20 ? value.substring(0, 3) + '...[redacted]' : value) : 'undefined'}`);
+        });
         
-        // Determine if we're in Railway's environment
-        console.log(`Redis Client Initialization:`);
-        console.log(`- Environment detection: RAILWAY_ENVIRONMENT=${process.env.RAILWAY_ENVIRONMENT}`);
-        console.log(`- Available env vars: REDIS_HOST=${process.env.REDIS_HOST}, REDIS_PORT=${process.env.REDIS_PORT}`);
+        // Get specific Redis password
+        const redisPassword = process.env.REDIS_PASSWORD;
+        console.log(`Using REDIS_PASSWORD of length: ${redisPassword ? redisPassword.length : 0}`);
         
-        const connectionInfo = this.getConnectionInfo();
-        
-        console.log(`- Environment resolved as: ${this.isRailway ? 'Railway' : 'Local'}`);
-        console.log(`- Selected host: ${connectionInfo.host}`);
-        console.log(`- Selected port: ${connectionInfo.port}`);
-        console.log(`- Password length: ${connectionInfo.password ? connectionInfo.password.length : 0}`);
-        console.log(`- Using internal networking: ${connectionInfo.useInternalNetworking}`);
-        
-        // Initialize Redis connection
-        const redisOptions = {
-            host: connectionInfo.host,
-            port: connectionInfo.port,
-            password: connectionInfo.password,
+        // Hard-coded connection for Railway environment
+        const connectionConfig = {
+            host: 'shinkansen.proxy.rlwy.net',
+            port: 51283,
+            password: redisPassword, // Use exactly what's in the environment variable
+            connectTimeout: 10000,
             retryStrategy: (times) => {
                 const delay = Math.min(times * 100, 3000);
                 console.log(`Redis retry attempt ${times} with delay ${delay}ms`);
                 return delay;
-            },
-            maxRetriesPerRequest: 3,
-            connectTimeout: 10000, // 10 seconds
-            enableOfflineQueue: false // Disable offline queue for faster failure detection
+            }
         };
         
-        this.client = new Redis(redisOptions);
+        // Log configuration (without exposing full password)
+        console.log('Redis connection config:', {
+            ...connectionConfig,
+            password: redisPassword ? `${redisPassword.substring(0, 3)}...` : 'undefined'
+        });
+        
+        // Create Redis client
+        this.client = new Redis(connectionConfig);
+
+        // Debug events
+        this.client.on('connect', () => {
+            console.log('Redis client connected to server');
+        });
+        
+        this.client.on('ready', () => {
+            console.log('Redis client ready');
+        });
 
         this.client.on('error', (err) => {
-            console.error('Redis Client Error:', err);
+            console.error(`Redis client error: ${err.message}`);
+            
+            // Special debug for auth errors
+            if (err.message.includes('WRONGPASS')) {
+                console.error('Authentication failed. Trying with more debug info...');
+                
+                // Create a separate client to test auth manually
+                const testClient = new Redis({
+                    host: connectionConfig.host,
+                    port: connectionConfig.port,
+                    connectTimeout: 5000
+                });
+                
+                testClient.on('connect', async () => {
+                    console.log('Test connection established, trying AUTH command directly');
+                    try {
+                        await testClient.auth(redisPassword);
+                        console.log('Direct AUTH succeeded!');
+                    } catch (authErr) {
+                        console.error(`Direct AUTH failed: ${authErr.message}`);
+                    } finally {
+                        testClient.disconnect();
+                    }
+                });
+                
+                testClient.on('error', (testErr) => {
+                    console.error(`Test connection error: ${testErr.message}`);
+                });
+            }
+            
             logError(`Redis Client Error: ${err.message}\nStack: ${err.stack}`);
         });
-
-        this.client.on('connect', () => {
-            console.log('Redis Client Connected Successfully');
-        });
-        
-        this.client.on('reconnecting', () => {
-            console.log('Redis Client Reconnecting...');
-        });
-    }
-    
-    // Helper method to determine connection info based on environment
-    getConnectionInfo() {
-        // Force Railway proxy connection for testing
-        console.log('Environment variables for Redis connection:');
-        console.log(`REDIS_HOST: ${process.env.REDIS_HOST || 'not set'}`);
-        console.log(`REDIS_PORT: ${process.env.REDIS_PORT || 'not set'}`);
-        console.log(`REDIS_PASSWORD length: ${process.env.REDIS_PASSWORD ? process.env.REDIS_PASSWORD.length : 0}`);
-        console.log(`RAILWAY_ENVIRONMENT: ${process.env.RAILWAY_ENVIRONMENT || 'not set'}`);
-        
-        // Railway environment - hardcoded connection to your specific instance
-        if (process.env.RAILWAY_ENVIRONMENT || 
-            process.env.RAILWAY_SERVICE_NAME || 
-            process.env.RAILWAY_STATIC_URL) {
-            console.log('Using Railway Redis connection with direct password');
-            
-            return {
-                host: 'shinkansen.proxy.rlwy.net',
-                port: 51283,
-                // Get password directly from environment, no processing
-                password: process.env.REDIS_PASSWORD,
-                useInternalNetworking: false
-            };
-        }
-        
-        // Local development fallback
-        console.log('Falling back to local development Redis connection');
-        return {
-            host: process.env.REDIS_HOST || 'localhost',
-            port: parseInt(process.env.REDIS_PORT || '6379'),
-            password: process.env.REDIS_PASSWORD,
-            useInternalNetworking: false
-        };
-    }
-
-    // Health check method - useful for verifying connection
-    async pingRedis() {
-        try {
-            const response = await this.client.ping();
-            return { success: true, response };
-        } catch (error) {
-            logError(`Redis ping failed: ${error.message}`);
-            return { success: false, error: error.message };
-        }
     }
 
     // Key format: `cooldown:${discordId1}-${element1}:${discordId2}-${element2}`
@@ -231,6 +219,16 @@ class RedisClient {
             console.error('Error getting player cooldowns:', error);
             logError(`Error getting player cooldowns: ${error.message}\nStack: ${error.stack}`);
             return [];
+        }
+    }
+    
+    // Simple ping method to check Redis connection
+    async ping() {
+        try {
+            const result = await this.client.ping();
+            return { success: true, result };
+        } catch (error) {
+            return { success: false, error: error.message };
         }
     }
 }
