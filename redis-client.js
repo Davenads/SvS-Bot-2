@@ -4,82 +4,23 @@ const { logError } = require('./logger');
 
 class RedisClient {
     constructor() {
-        // Debug environment variables related to Redis
-        console.log('=== REDIS CLIENT DEBUG ===');
-        Object.keys(process.env).filter(key => 
-            key.includes('REDIS') || key.includes('SvS') || key.includes('SVS')
-        ).forEach(key => {
-            const value = process.env[key];
-            console.log(`ENV ${key}: ${value ? (value.length > 20 ? value.substring(0, 3) + '...[redacted]' : value) : 'undefined'}`);
-        });
-        
-        // Get specific Redis password
-        const redisPassword = process.env.REDIS_PASSWORD;
-        console.log(`Using REDIS_PASSWORD of length: ${redisPassword ? redisPassword.length : 0}`);
-        
-        // Hard-coded connection for Railway environment
-        const connectionConfig = {
-            host: 'shinkansen.proxy.rlwy.net',
-            port: 51283,
-            password: redisPassword, // Use exactly what's in the environment variable
-            connectTimeout: 10000,
+        this.client = new Redis({
+            host: process.env.REDIS_HOST || 'localhost',
+            port: process.env.REDIS_PORT || 6379,
+            password: process.env.REDIS_PASSWORD,
             retryStrategy: (times) => {
-                const delay = Math.min(times * 100, 3000);
-                console.log(`Redis retry attempt ${times} with delay ${delay}ms`);
+                const delay = Math.min(times * 50, 2000);
                 return delay;
             }
-        };
-        
-        // Log configuration (without exposing full password)
-        console.log('Redis connection config:', {
-            ...connectionConfig,
-            password: redisPassword ? `${redisPassword.substring(0, 3)}...` : 'undefined'
-        });
-        
-        // Create Redis client
-        this.client = new Redis(connectionConfig);
-
-        // Debug events
-        this.client.on('connect', () => {
-            console.log('Redis client connected to server');
-        });
-        
-        this.client.on('ready', () => {
-            console.log('Redis client ready');
         });
 
         this.client.on('error', (err) => {
-            console.error(`Redis client error: ${err.message}`);
-            
-            // Special debug for auth errors
-            if (err.message.includes('WRONGPASS')) {
-                console.error('Authentication failed. Trying with more debug info...');
-                
-                // Create a separate client to test auth manually
-                const testClient = new Redis({
-                    host: connectionConfig.host,
-                    port: connectionConfig.port,
-                    connectTimeout: 5000
-                });
-                
-                testClient.on('connect', async () => {
-                    console.log('Test connection established, trying AUTH command directly');
-                    try {
-                        await testClient.auth(redisPassword);
-                        console.log('Direct AUTH succeeded!');
-                    } catch (authErr) {
-                        console.error(`Direct AUTH failed: ${authErr.message}`);
-                    } finally {
-                        testClient.disconnect();
-                    }
-                });
-                
-                testClient.on('error', (testErr) => {
-                    console.error(`Test connection error: ${testErr.message}`);
-                });
-            }
-            
+            console.error('Redis Client Error:', err);
             logError(`Redis Client Error: ${err.message}\nStack: ${err.stack}`);
+        });
+
+        this.client.on('connect', () => {
+            console.log('Redis Client Connected');
         });
     }
 
@@ -94,7 +35,7 @@ class RedisClient {
 
     async setCooldown(player1, player2) {
         const key = this.generateCooldownKey(player1, player2);
-        const expiryTime = 24 * 60 * 60; // 24 hours in seconds
+        const expiryTime = 24 * 60 * 60; // 12 hours in seconds
         const cooldownData = JSON.stringify({
             player1: {
                 discordId: player1.discordId,
@@ -219,16 +160,6 @@ class RedisClient {
             console.error('Error getting player cooldowns:', error);
             logError(`Error getting player cooldowns: ${error.message}\nStack: ${error.stack}`);
             return [];
-        }
-    }
-    
-    // Simple ping method to check Redis connection
-    async ping() {
-        try {
-            const result = await this.client.ping();
-            return { success: true, result };
-        } catch (error) {
-            return { success: false, error: error.message };
         }
     }
 }
