@@ -23,6 +23,11 @@ module.exports = {
     
     async execute(interaction) {
         try {
+            // Log who invoked the command
+            const user = interaction.user.tag;
+            const timestamp = new Date().toISOString();
+            console.log(`[${timestamp}] /currentchallenges command executed by ${user}`);
+            
             // Fetch all data from the sheet dynamically
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
@@ -31,6 +36,7 @@ module.exports = {
 
             const rows = result.data.values;
             if (!rows || !rows.length) {
+                console.log(`[${timestamp}] No challenges found for ${user}'s request`);
                 return interaction.reply({ content: 'No challenges found.', ephemeral: true });
             }
 
@@ -43,6 +49,9 @@ module.exports = {
 
             // Find players currently in "Challenge" state
             const challenges = rows.filter(row => row[5] === 'Challenge'); // Check if the "Status" column has "Challenge"
+            
+            // Log number of challenge pairs found
+            console.log(`[${timestamp}] Found ${challenges.length} challenges for ${user}'s request`);
             
             if (challenges.length === 0) {
                 return interaction.reply({ content: 'There are currently no active challenges.', ephemeral: true });
@@ -90,11 +99,17 @@ Challenge Date: ${challengeDate}`,
                 });
             });
 
+            // Log number of unique challenge pairs
+            console.log(`[${timestamp}] Displayed ${processedPairs.size} unique challenge pairs to ${user}`);
+            
             // Send the embed privately to the user who invoked the command
             await interaction.reply({ embeds: [challengeEmbed], ephemeral: true });
 
         } catch (error) {
-            logError(`Error fetching current challenges: ${error.message}\nStack: ${error.stack}`);
+            // Log error with user information
+            const errorMsg = `Error fetching current challenges for ${interaction.user.tag}: ${error.message}\nStack: ${error.stack}`;
+            logError(errorMsg);
+            console.error(`[${new Date().toISOString()}] ${errorMsg}`);
             await interaction.reply({ content: 'There was an error fetching the current challenges. Please try again.', ephemeral: true });
         }
     },
