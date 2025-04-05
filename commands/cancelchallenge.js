@@ -1,6 +1,7 @@
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const redisClient = require('../redis-client');
 
 const elementEmojis = {
   'Fire': '🔥',
@@ -101,6 +102,15 @@ module.exports = {
           valueInputOption: 'USER_ENTERED',
           resource: { values: update.values }
         });
+      }
+      
+      // Remove the challenge from Redis
+      try {
+        await redisClient.removeChallenge(playerRow[0], opponentRow[0]);
+        console.log('Challenge removed from Redis');
+      } catch (error) {
+        console.error('Error removing challenge from Redis:', error);
+        // Continue with the cancellation even if Redis removal fails
       }
 
       // Prepare an embed message to confirm the cancellation

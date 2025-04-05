@@ -2,6 +2,7 @@ require('dotenv').config(); // Load environment variables from .env file
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const { initializeChallengeExpiryHandler, runSafetyCheck } = require('./challenge-expiry-handler');
 
 // Initialize the Discord client with the necessary intents
 const client = new Client({
@@ -30,6 +31,18 @@ for (const file of commandFiles) {
 client.once('ready', () => {
     const timestamp = new Date().toLocaleString();
     console.log(`Logged in as ${client.user.tag} at ${timestamp}`);
+    
+    // Initialize the event-driven challenge expiry handler
+    initializeChallengeExpiryHandler(client);
+    
+    // Run a safety check on startup
+    runSafetyCheck(client);
+    
+    // Set up a recurring safety check every hour
+    // This ensures we don't miss any expirations due to Redis connection issues
+    setInterval(() => {
+        runSafetyCheck(client);
+    }, 60 * 60 * 1000); // 1 hour in milliseconds
 });
 
 // Event listener for handling interactions (slash commands and autocomplete)

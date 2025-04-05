@@ -1,10 +1,25 @@
 // redis-client.js
 const Redis = require('ioredis');
 const { logError } = require('./logger');
+const { EventEmitter } = require('events');
 
-class RedisClient {
+class RedisClient extends EventEmitter {
     constructor() {
+        super();
+        
+        // Main client for regular operations
         this.client = new Redis({
+            host: process.env.REDIS_HOST || 'localhost',
+            port: process.env.REDIS_PORT || 6379,
+            password: process.env.REDIS_PASSWORD,
+            retryStrategy: (times) => {
+                const delay = Math.min(times * 50, 2000);
+                return delay;
+            }
+        });
+
+        // Separate subscription client for keyspace notifications
+        this.subClient = new Redis({
             host: process.env.REDIS_HOST || 'localhost',
             port: process.env.REDIS_PORT || 6379,
             password: process.env.REDIS_PASSWORD,
@@ -21,6 +36,35 @@ class RedisClient {
 
         this.client.on('connect', () => {
             console.log('Redis Client Connected');
+            // Configure Redis to enable keyspace events for expired keys
+            this.client.config('SET', 'notify-keyspace-events', 'Ex');
+        });
+        
+        this.subClient.on('error', (err) => {
+            console.error('Redis Subscription Client Error:', err);
+            logError(`Redis Subscription Client Error: ${err.message}\nStack: ${err.stack}`);
+        });
+
+        this.subClient.on('connect', () => {
+            console.log('Redis Subscription Client Connected');
+            // Subscribe to expiration events
+            this.subClient.subscribe('__keyevent@0__:expired');
+        });
+        
+        // Handle expiration events
+        this.subClient.on('message', (channel, message) => {
+            console.log(`Received message from channel ${channel}: ${message}`);
+            
+            // Handle challenge expirations
+            if (channel === '__keyevent@0__:expired') {
+                if (message.startsWith('challenge:')) {
+                    console.log(`Challenge key expired: ${message}`);
+                    this.emit('challengeExpired', message);
+                } else if (message.startsWith('challenge-warning:')) {
+                    console.log(`Challenge warning key expired: ${message}`);
+                    this.emit('challengeWarning', message.replace('challenge-warning:', 'challenge:'));
+                }
+            }
         });
     }
 
@@ -33,9 +77,15 @@ class RedisClient {
         return `cooldown:${pair[0]}:${pair[1]}`;
     }
 
+    // Key format: `challenge:${player1Rank}-${player2Rank}`
+    generateChallengeKey(player1Rank, player2Rank) {
+        const pair = [String(player1Rank), String(player2Rank)].sort();
+        return `challenge:${pair[0]}-${pair[1]}`;
+    }
+
     async setCooldown(player1, player2) {
         const key = this.generateCooldownKey(player1, player2);
-        const expiryTime = 24 * 60 * 60; // 12 hours in seconds
+        const expiryTime = 24 * 60 * 60; // 24 hours in seconds
         const cooldownData = JSON.stringify({
             player1: {
                 discordId: player1.discordId,
@@ -58,6 +108,178 @@ class RedisClient {
         } catch (error) {
             console.error('Error setting cooldown:', error);
             logError(`Error setting cooldown: ${error.message}\nStack: ${error.stack}`);
+            return false;
+        }
+    }
+
+    async setChallenge(player1, player2, challengeDate) {
+        const key = this.generateChallengeKey(player1.rank, player2.rank);
+        // 3 days expiry (259,200 seconds)
+        const expiryTime = 3 * 24 * 60 * 60;
+        // 24 hours before expiration (for warning) - 2 days
+        const warningTime = 2 * 24 * 60 * 60;
+        
+        const challengeData = JSON.stringify({
+            player1: {
+                discordId: player1.discordId,
+                name: player1.name,
+                element: player1.element,
+                rank: player1.rank
+            },
+            player2: {
+                discordId: player2.discordId,
+                name: player2.name,
+                element: player2.element,
+                rank: player2.rank
+            },
+            challengeDate: challengeDate,
+            startTime: Date.now(),
+            expiryTime: Date.now() + (expiryTime * 1000)
+        });
+        
+        try {
+            // Set the main challenge with expiration
+            await this.client.setex(key, expiryTime, challengeData);
+            console.log(`Set challenge for ${key} with expiry ${expiryTime}s`);
+            
+            // Set a separate key for the warning (expires 24 hours before the main challenge)
+            const warningKey = `challenge-warning:${key.substring(10)}`;
+            await this.client.setex(warningKey, warningTime, key);
+            console.log(`Set warning for ${warningKey} with expiry ${warningTime}s`);
+            
+            return true;
+        } catch (error) {
+            console.error('Error setting challenge:', error);
+            logError(`Error setting challenge: ${error.message}\nStack: ${error.stack}`);
+            return false;
+        }
+    }
+
+    async updateChallenge(player1Rank, player2Rank, newChallengeDate) {
+        const key = this.generateChallengeKey(player1Rank, player2Rank);
+        // Reset to 3 days from now
+        const expiryTime = 3 * 24 * 60 * 60;
+        // 24 hours before expiration (for warning) - 2 days
+        const warningTime = 2 * 24 * 60 * 60;
+        
+        try {
+            const challengeDataStr = await this.client.get(key);
+            
+            if (!challengeDataStr) {
+                console.error(`Challenge not found for ${key}`);
+                return false;
+            }
+            
+            const challengeData = JSON.parse(challengeDataStr);
+            
+            // Update challenge date and reset expiration
+            challengeData.challengeDate = newChallengeDate;
+            challengeData.startTime = Date.now();
+            challengeData.expiryTime = Date.now() + (expiryTime * 1000);
+            
+            // Remove old warning key if it exists
+            const oldWarningKey = `challenge-warning:${key.substring(10)}`;
+            await this.client.del(oldWarningKey);
+            
+            // Set main challenge with updated data
+            await this.client.setex(key, expiryTime, JSON.stringify(challengeData));
+            console.log(`Updated challenge for ${key} with new expiry ${expiryTime}s`);
+            
+            // Set a new warning key
+            const warningKey = `challenge-warning:${key.substring(10)}`;
+            await this.client.setex(warningKey, warningTime, key);
+            console.log(`Reset warning for ${warningKey} with expiry ${warningTime}s`);
+            
+            return true;
+        } catch (error) {
+            console.error('Error updating challenge:', error);
+            logError(`Error updating challenge: ${error.message}\nStack: ${error.stack}`);
+            return false;
+        }
+    }
+
+    async checkChallenge(player1Rank, player2Rank) {
+        const key = this.generateChallengeKey(player1Rank, player2Rank);
+        
+        try {
+            const challengeData = await this.client.get(key);
+            if (challengeData) {
+                const ttl = await this.client.ttl(key);
+                const data = JSON.parse(challengeData);
+                return {
+                    active: true,
+                    remainingTime: ttl,
+                    details: data
+                };
+            }
+            return {
+                active: false,
+                remainingTime: 0,
+                details: null
+            };
+        } catch (error) {
+            console.error('Error checking challenge:', error);
+            logError(`Error checking challenge: ${error.message}\nStack: ${error.stack}`);
+            return {
+                active: false,
+                remainingTime: 0,
+                details: null,
+                error: true
+            };
+        }
+    }
+
+    async getAllChallenges() {
+        try {
+            const keys = await this.client.keys('challenge:*');
+            const challenges = [];
+            
+            for (const key of keys) {
+                const challengeData = await this.client.get(key);
+                const ttl = await this.client.ttl(key);
+                
+                if (challengeData) {
+                    const data = JSON.parse(challengeData);
+                    challenges.push({
+                        key: key,
+                        player1: data.player1,
+                        player2: data.player2,
+                        challengeDate: data.challengeDate,
+                        remainingTime: ttl,
+                        warningNotificationSent: data.warningNotificationSent || false
+                    });
+                }
+            }
+            
+            return challenges;
+        } catch (error) {
+            console.error('Error listing challenges:', error);
+            logError(`Error listing challenges: ${error.message}\nStack: ${error.stack}`);
+            return [];
+        }
+    }
+
+    // This method is no longer needed with the event-driven approach
+    // We now use separate keys for warnings that expire automatically
+    // Keeping a stub for backward compatibility
+    async markChallengeWarningAsSent(player1Rank, player2Rank) {
+        console.log('Warning notifications are now handled via expired events - this method is deprecated');
+        return true;
+    }
+
+    async removeChallenge(player1Rank, player2Rank) {
+        const key = this.generateChallengeKey(player1Rank, player2Rank);
+        const warningKey = `challenge-warning:${key.substring(10)}`;
+        
+        try {
+            // Remove both the challenge key and warning key
+            await this.client.del(key);
+            await this.client.del(warningKey);
+            console.log(`Removed challenge and warning for ${key}`);
+            return true;
+        } catch (error) {
+            console.error('Error removing challenge:', error);
+            logError(`Error removing challenge: ${error.message}\nStack: ${error.stack}`);
             return false;
         }
     }

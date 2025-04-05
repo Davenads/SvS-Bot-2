@@ -255,7 +255,7 @@ module.exports = {
                 // Add nullified challenges details
                 if (nullifiedChallenges.length > 0) {
                     const challengesList = nullifiedChallenges
-                        .map(c => `Rank #${c.playerRank} ${c.player} vs Rank #${c.opponentRank} ${c.opponent} (${c.date}) - ${c.daysPast} days old`)
+                        .map(c => `Rank #${c.playerRank} ${c.player} vs Rank #${c.opponentRank} ${c.opponent} - ${c.daysPast} days old`)
                         .join('\n');
                     
                     if (challengesList.length <= 1024) {

@@ -5,14 +5,14 @@ const { logError } = require('../logger')
 const redisClient = require('../redis-client');
 
 const sheets = google.sheets({
-  version: 'v4',
-  auth: new google.auth.JWT(
-    process.env.GOOGLE_CLIENT_EMAIL,
-    null,
-    process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    ['https://www.googleapis.com/auth/spreadsheets']
-  )
-});
+    version: 'v4',
+    auth: new google.auth.JWT(
+      process.env.GOOGLE_CLIENT_EMAIL,
+      null,
+      process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      ['https://www.googleapis.com/auth/spreadsheets']
+    )
+  });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
 const SHEET_NAME = 'SvS Ladder'
@@ -254,6 +254,25 @@ module.exports = {
       await Promise.all(updatePromises)
       console.log('├─ Challenge status updated successfully')
 
+      // Store challenge in Redis with expiration
+      const challenger = {
+        discordId: challengerRow[8],
+        name: challengerRow[1],
+        element: challengerRow[3],
+        rank: challengerRank
+      }
+
+      const target = {
+        discordId: targetRow[8],
+        name: targetRow[1],
+        element: targetRow[3],
+        rank: targetRank
+      }
+
+      // Set the challenge in Redis with the 3-day TTL
+      await redisClient.setChallenge(challenger, target, challengeDate)
+      console.log('├─ Challenge set in Redis with 3-day expiration')
+
       // Create and send announcement embed
       const challengeEmbed = new EmbedBuilder()
         .setColor(0x00ae86)
@@ -281,7 +300,7 @@ ${specEmojiMap[targetRow[2]] || ''} ${elementEmojiMap[targetRow[3]] || ''}`,
         )
         .setTimestamp()
         .setFooter({
-          text: 'May the best player win!',
+          text: 'May the best player win! Challenge expires in 3 days.',
           iconURL: interaction.client.user.displayAvatarURL()
         })
 

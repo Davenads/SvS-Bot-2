@@ -292,6 +292,15 @@ module.exports = {
         resource: { requests: [...requests, ...elementUpdateRequests] }
       })
 
+      // Remove challenge from Redis (if it exists)
+      try {
+        await redisClient.removeChallenge(winnerRank, loserRank);
+        console.log('├─ Removed challenge from Redis tracking');
+      } catch (error) {
+        console.error('Error removing challenge from Redis:', error);
+        // Continue with the report even if Redis removal fails
+      }
+
       // Create result announcement embed
       const victoryMessage = isDefense
         ? victoryMessages.defense[

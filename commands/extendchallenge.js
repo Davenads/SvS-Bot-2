@@ -2,6 +2,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { DateTime } = require('luxon');
+const redisClient = require('../redis-client');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -143,6 +144,13 @@ module.exports = {
           resource: { values: update.values }
         });
       }
+      
+      // Update the challenge in Redis to reset the expiration
+      console.log('Updating challenge in Redis...');
+      const player1Rank = playerRow[0];
+      const player2Rank = opponentRow[0];
+      await redisClient.updateChallenge(player1Rank, player2Rank, formattedDate);
+      console.log('Redis challenge updated successfully');
 
       // Prepare an embed message to confirm the extension
       const playerNameText = playerRow[1];
