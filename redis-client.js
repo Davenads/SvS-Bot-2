@@ -259,12 +259,30 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    // This method is no longer needed with the event-driven approach
-    // We now use separate keys for warnings that expire automatically
-    // Keeping a stub for backward compatibility
+    // Create or check a warning lock to prevent duplicate notifications
     async markChallengeWarningAsSent(player1Rank, player2Rank) {
-        console.log('Warning notifications are now handled via expired events - this method is deprecated');
-        return true;
+        const key = this.generateChallengeKey(player1Rank, player2Rank);
+        const warningLockKey = `warning-lock:${key.substring(10)}`;
+        
+        try {
+            // Try to set the lock with NX option (only set if it doesn't exist)
+            // This lock will expire after 60 seconds to prevent any potential deadlock
+            const result = await this.client.set(warningLockKey, '1', 'EX', 60, 'NX');
+            
+            // If result is null, the key already exists (warning already sent)
+            if (result === null) {
+                console.log(`Warning already sent for challenge ${key} (lock exists)`);
+                return false;
+            }
+            
+            console.log(`Set warning lock for ${key}`);
+            return true;
+        } catch (error) {
+            console.error('Error setting warning lock:', error);
+            logError(`Error setting warning lock: ${error.message}\nStack: ${error.stack}`);
+            // If there's an error, allow the warning to be sent (fail open)
+            return true;
+        }
     }
 
     async removeChallenge(player1Rank, player2Rank) {

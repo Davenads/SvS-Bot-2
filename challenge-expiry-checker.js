@@ -111,12 +111,16 @@ async function checkChallengeExpirations(client) {
       if (remainingTime <= ONE_DAY_IN_SECONDS && !warningNotificationSent) {
         console.log(`Challenge between Rank #${player1.rank} and Rank #${player2.rank} will expire in less than 24 hours`);
         
-        // Send warning message
-        await challengesChannel.send(`⚠️ **CHALLENGE EXPIRING SOON** ⚠️\n\n<@${player1.discordId}> and <@${player2.discordId}>, your challenge will automatically expire in less than 24 hours! Please complete your match or ask an SvS Manager to extend the challenge.`);
+        // Try to acquire a lock to prevent duplicate warnings
+        const canSendWarning = await redisClient.markChallengeWarningAsSent(player1.rank, player2.rank);
         
-        // Mark warning as sent in Redis
-        await redisClient.markChallengeWarningAsSent(player1.rank, player2.rank);
-        console.log('Warning notification sent and marked in Redis');
+        if (canSendWarning) {
+          // Send warning message
+          await challengesChannel.send(`⚠️ **CHALLENGE EXPIRING SOON** ⚠️\n\n<@${player1.discordId}> and <@${player2.discordId}>, your challenge will automatically expire in less than 24 hours! Please complete your match or ask an SvS Manager to extend the challenge.`);
+          console.log('Warning notification sent and marked in Redis');
+        } else {
+          console.log(`Warning already sent for challenge between Rank #${player1.rank} and Rank #${player2.rank}, skipping duplicate`);
+        }
       }
       
       // Check if challenge has expired

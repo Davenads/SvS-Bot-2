@@ -46,7 +46,18 @@ function initializeChallengeExpiryHandler(client) {
   redisClient.on('challengeWarning', async (challengeKey) => {
     console.log(`[CHALLENGE EXPIRY HANDLER] Received warning event for ${challengeKey}`);
     try {
-      await handleChallengeWarning(client, challengeKey);
+      // Extract player ranks from the key to check if warning was already sent
+      const ranksPart = challengeKey.substring(10); // Remove 'challenge:' prefix
+      const [rank1, rank2] = ranksPart.split('-').map(Number);
+      
+      // Try to acquire a lock to prevent duplicate warnings
+      const canSendWarning = await redisClient.markChallengeWarningAsSent(rank1, rank2);
+      
+      if (canSendWarning) {
+        await handleChallengeWarning(client, challengeKey);
+      } else {
+        console.log(`[CHALLENGE EXPIRY HANDLER] Skipping duplicate warning for ${challengeKey}`);
+      }
     } catch (error) {
       console.error(`[CHALLENGE EXPIRY HANDLER] Error processing challenge warning: ${error.message}`);
       logError(`Challenge warning handler error: ${error.message}\nStack: ${error.stack}`);
@@ -99,6 +110,19 @@ async function handleChallengeWarning(client, challengeKey) {
     
     // Send warning message
     await challengesChannel.send(`⚠️ **CHALLENGE EXPIRING SOON** ⚠️\n\n<@${player1.discordId}> and <@${player2.discordId}>, your challenge will automatically expire in less than 24 hours! Please complete your match or ask an SvS Manager to extend the challenge.`);
+    
+    // Update the challenge data to indicate warning was sent (belt and suspenders)
+    try {
+      const updatedData = { ...parsedData, warningNotificationSent: true };
+      // Set with the current TTL
+      const ttl = await redisClient.client.ttl(challengeKey);
+      if (ttl > 0) {
+        await redisClient.client.setex(challengeKey, ttl, JSON.stringify(updatedData));
+      }
+    } catch (updateError) {
+      console.error(`Error updating challenge data after warning: ${updateError.message}`);
+      // Non-fatal error, continue
+    }
     
     console.log(`Warning notification sent for challenge between ranks ${rank1} and ${rank2}`);
   } catch (error) {
@@ -319,10 +343,22 @@ async function runSafetyCheck(client) {
       // Check if we're within 24 hours of expiry but the warning hasn't been sent
       if (remainingTime <= 24 * 60 * 60 && remainingTime > 23.9 * 60 * 60) {
         console.log(`Safety check: Challenge ${key} should be sending warning soon`);
-        // The warning key should have expired, but just in case, trigger the warning
-        handleChallengeWarning(client, key).catch(err => {
-          console.error(`Safety check error processing warning: ${err.message}`);
-        });
+        
+        // Extract player ranks from the key to check if warning was already sent
+        const ranksPart = key.substring(10); // Remove 'challenge:' prefix
+        const [rank1, rank2] = ranksPart.split('-').map(Number);
+        
+        // Try to acquire a lock to prevent duplicate warnings
+        const canSendWarning = await redisClient.markChallengeWarningAsSent(rank1, rank2);
+        
+        if (canSendWarning) {
+          // The warning key should have expired, but just in case, trigger the warning
+          handleChallengeWarning(client, key).catch(err => {
+            console.error(`Safety check error processing warning: ${err.message}`);
+          });
+        } else {
+          console.log(`Safety check: Warning already sent for ${key}, skipping duplicate`);
+        }
       }
     }
     
