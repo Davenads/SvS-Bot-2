@@ -66,6 +66,10 @@ module.exports = {
                     value: 'Extend a challenge deadline by 2 days\n• Updates both players\' challenge dates'
                 },
                 {
+                    name: '/dodge [rank]',
+                    value: 'Record a dodge for the player at the specified rank\n• Increments their dodge counter by 1'
+                },
+                {
                     name: '/nullchallenges',
                     value: 'Automatically voids all challenges older than 3 days\n• Resets affected players to Available status'
                 }
