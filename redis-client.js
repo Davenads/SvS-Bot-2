@@ -4,30 +4,47 @@ const { logError } = require('./logger');
 const { EventEmitter } = require('events');
 
 class RedisClient extends EventEmitter {
+    // Helper method to determine Redis configuration based on environment
+    getRedisConfig() {
+        // Check if running on Heroku with RedisCloud
+        if (process.env.REDISCLOUD_URL) {
+            // Parse the RedisCloud URL
+            const redisUrl = new URL(process.env.REDISCLOUD_URL);
+            return {
+                host: redisUrl.hostname,
+                port: parseInt(redisUrl.port),
+                password: redisUrl.password ? redisUrl.password : null,
+                tls: redisUrl.protocol === 'rediss:' ? {} : null,
+                retryStrategy: (times) => {
+                    const delay = Math.min(times * 50, 2000);
+                    return delay;
+                }
+            };
+        } else {
+            // Local or custom Redis configuration
+            return {
+                host: process.env.REDIS_HOST || 'localhost',
+                port: process.env.REDIS_PORT || 6379,
+                password: process.env.REDIS_PASSWORD,
+                retryStrategy: (times) => {
+                    const delay = Math.min(times * 50, 2000);
+                    return delay;
+                }
+            };
+        }
+    }
+
     constructor() {
         super();
-        
+
+        // Configure Redis clients based on environment
+        const redisConfig = this.getRedisConfig();
+
         // Main client for regular operations
-        this.client = new Redis({
-            host: process.env.REDIS_HOST || 'localhost',
-            port: process.env.REDIS_PORT || 6379,
-            password: process.env.REDIS_PASSWORD,
-            retryStrategy: (times) => {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
-            }
-        });
+        this.client = new Redis(redisConfig);
 
         // Separate subscription client for keyspace notifications
-        this.subClient = new Redis({
-            host: process.env.REDIS_HOST || 'localhost',
-            port: process.env.REDIS_PORT || 6379,
-            password: process.env.REDIS_PASSWORD,
-            retryStrategy: (times) => {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
-            }
-        });
+        this.subClient = new Redis(redisConfig);
 
         this.client.on('error', (err) => {
             console.error('Redis Client Error:', err);

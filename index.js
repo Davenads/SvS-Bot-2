@@ -2,6 +2,7 @@ require('dotenv').config(); // Load environment variables from .env file
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const { initializeChallengeExpiryHandler, runSafetyCheck } = require('./challenge-expiry-handler');
 
 // Initialize the Discord client with the necessary intents
@@ -95,3 +96,14 @@ client.on('interactionCreate', async interaction => {
 
 // Login to Discord with your bot token
 client.login(process.env.BOT_TOKEN);
+
+// Setup a basic HTTP server to satisfy Heroku
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('SvS Bot is running!\n');
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
