@@ -48,7 +48,7 @@ class RedisClient extends EventEmitter {
 
         this.client.on('error', (err) => {
             console.error('Redis Client Error:', err);
-            logError(`Redis Client Error: ${err.message}\nStack: ${err.stack}`);
+            logError('Redis Client Error', err);
         });
 
         this.client.on('connect', () => {
@@ -59,7 +59,7 @@ class RedisClient extends EventEmitter {
         
         this.subClient.on('error', (err) => {
             console.error('Redis Subscription Client Error:', err);
-            logError(`Redis Subscription Client Error: ${err.message}\nStack: ${err.stack}`);
+            logError('Redis Subscription Client Error', err);
         });
 
         this.subClient.on('connect', () => {
@@ -124,7 +124,7 @@ class RedisClient extends EventEmitter {
             return true;
         } catch (error) {
             console.error('Error setting cooldown:', error);
-            logError(`Error setting cooldown: ${error.message}\nStack: ${error.stack}`);
+            logError('Error setting cooldown', error);
             return false;
         }
     }
@@ -167,7 +167,7 @@ class RedisClient extends EventEmitter {
             return true;
         } catch (error) {
             console.error('Error setting challenge:', error);
-            logError(`Error setting challenge: ${error.message}\nStack: ${error.stack}`);
+            logError('Error setting challenge', error);
             return false;
         }
     }
@@ -210,7 +210,7 @@ class RedisClient extends EventEmitter {
             return true;
         } catch (error) {
             console.error('Error updating challenge:', error);
-            logError(`Error updating challenge: ${error.message}\nStack: ${error.stack}`);
+            logError('Error updating challenge', error);
             return false;
         }
     }
@@ -236,7 +236,7 @@ class RedisClient extends EventEmitter {
             };
         } catch (error) {
             console.error('Error checking challenge:', error);
-            logError(`Error checking challenge: ${error.message}\nStack: ${error.stack}`);
+            logError('Error checking challenge', error);
             return {
                 active: false,
                 remainingTime: 0,
@@ -271,7 +271,7 @@ class RedisClient extends EventEmitter {
             return challenges;
         } catch (error) {
             console.error('Error listing challenges:', error);
-            logError(`Error listing challenges: ${error.message}\nStack: ${error.stack}`);
+            logError('Error listing challenges', error);
             return [];
         }
     }
@@ -296,7 +296,7 @@ class RedisClient extends EventEmitter {
             return true;
         } catch (error) {
             console.error('Error setting warning lock:', error);
-            logError(`Error setting warning lock: ${error.message}\nStack: ${error.stack}`);
+            logError('Error setting warning lock', error);
             // If there's an error, allow the warning to be sent (fail open)
             return true;
         }
@@ -314,7 +314,7 @@ class RedisClient extends EventEmitter {
             return true;
         } catch (error) {
             console.error('Error removing challenge:', error);
-            logError(`Error removing challenge: ${error.message}\nStack: ${error.stack}`);
+            logError('Error removing challenge', error);
             return false;
         }
     }
@@ -340,7 +340,7 @@ class RedisClient extends EventEmitter {
             };
         } catch (error) {
             console.error('Error checking cooldown:', error);
-            logError(`Error checking cooldown: ${error.message}\nStack: ${error.stack}`);
+            logError('Error checking cooldown', error);
             return {
                 onCooldown: false,
                 remainingTime: 0,
@@ -359,7 +359,7 @@ class RedisClient extends EventEmitter {
             return true;
         } catch (error) {
             console.error('Error removing cooldown:', error);
-            logError(`Error removing cooldown: ${error.message}\nStack: ${error.stack}`);
+            logError('Error removing cooldown', error);
             return false;
         }
     }
@@ -387,7 +387,7 @@ class RedisClient extends EventEmitter {
             return cooldowns;
         } catch (error) {
             console.error('Error listing cooldowns:', error);
-            logError(`Error listing cooldowns: ${error.message}\nStack: ${error.stack}`);
+            logError('Error listing cooldowns', error);
             return [];
         }
     }
@@ -415,7 +415,7 @@ class RedisClient extends EventEmitter {
             return cooldowns;
         } catch (error) {
             console.error('Error getting player cooldowns:', error);
-            logError(`Error getting player cooldowns: ${error.message}\nStack: ${error.stack}`);
+            logError('Error getting player cooldowns', error);
             return [];
         }
     }

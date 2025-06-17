@@ -60,7 +60,7 @@ function initializeChallengeExpiryHandler(client) {
       }
     } catch (error) {
       console.error(`[CHALLENGE EXPIRY HANDLER] Error processing challenge warning: ${error.message}`);
-      logError(`Challenge warning handler error: ${error.message}\nStack: ${error.stack}`);
+      logError('Challenge warning handler error', error);
     }
   });
   
@@ -71,7 +71,7 @@ function initializeChallengeExpiryHandler(client) {
       await handleChallengeExpiration(client, challengeKey);
     } catch (error) {
       console.error(`[CHALLENGE EXPIRY HANDLER] Error processing challenge expiration: ${error.message}`);
-      logError(`Challenge expiration handler error: ${error.message}\nStack: ${error.stack}`);
+      logError('Challenge expiration handler error', error);
     }
   });
   
@@ -127,7 +127,7 @@ async function handleChallengeWarning(client, challengeKey) {
     console.log(`Warning notification sent for challenge between ranks ${rank1} and ${rank2}`);
   } catch (error) {
     console.error(`Error handling challenge warning: ${error.message}`);
-    logError(`Challenge warning handler error: ${error.message}\nStack: ${error.stack}`);
+    logError('Challenge warning handler error', error);
     throw error; // Re-throw to be caught by the parent handler
   }
 }
@@ -304,7 +304,7 @@ ${specEmojiMap[challenge.player2.spec] || ''} ${elementEmojiMap[challenge.player
     console.log('Auto-nullification embed sent to challenges channel');
   } catch (error) {
     console.error(`Error handling challenge expiration: ${error.message}`);
-    logError(`Challenge expiration handler error: ${error.message}\nStack: ${error.stack}`);
+    logError('Challenge expiration handler error', error);
     throw error; // Re-throw to be caught by the parent handler
   }
 }
@@ -365,7 +365,7 @@ async function runSafetyCheck(client) {
     console.log('[CHALLENGE EXPIRY HANDLER] Safety check completed');
   } catch (error) {
     console.error(`[CHALLENGE EXPIRY HANDLER] Error in safety check: ${error.message}`);
-    logError(`Challenge safety check error: ${error.message}\nStack: ${error.stack}`);
+    logError('Challenge safety check error', error);
   }
 }
 

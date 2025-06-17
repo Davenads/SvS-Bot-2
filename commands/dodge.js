@@ -116,7 +116,7 @@ module.exports = {
             
         } catch (error) {
             console.error(`└─ Error: ${error.message}`);
-            logError(`Error in dodge command: ${error.message}\nStack: ${error.stack}`);
+            logError('Error in dodge command', error);
             return interaction.editReply({
                 content: 'An error occurred while recording the dodge. Please try again later.'
             });

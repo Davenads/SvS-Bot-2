@@ -445,9 +445,7 @@ ${specEmojis[loserDetails.spec]} ${loserDetails.spec} ${
       console.log('└─ Command completed successfully')
     } catch (error) {
       console.error(`└─ Error: ${error.message}`)
-      logError(
-        `Error in reportwin command: ${error.message}\nStack: ${error.stack}`
-      )
+      logError('Error in reportwin command', error)
 
       await interaction.editReply({
         content:

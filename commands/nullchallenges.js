@@ -309,8 +309,7 @@ module.exports = {
 
         } catch (error) {
             console.error(`└─ Error executing nullchallenges command: ${error.message}`);
-            console.error(error.stack);
-            logError(`Nullchallenges command error: ${error.message}\nStack: ${error.stack}`);
+            logError('Nullchallenges command error', error);
             
             await interaction.editReply({
                 content: 'An error occurred while processing the command. Please try again later.'

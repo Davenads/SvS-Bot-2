@@ -307,9 +307,7 @@ ${specEmojiMap[targetRow[2]] || ''} ${elementEmojiMap[targetRow[3]] || ''}`,
       console.log('└─ Challenge command completed successfully')
     } catch (error) {
       console.log(`└─ Error executing challenge command: ${error.message}`)
-      logError(
-        `Challenge command error: ${error.message}\nStack: ${error.stack}`
-      )
+      logError('Challenge command error', error)
       await interaction.editReply({
         content:
           'An error occurred while processing your challenge. Please try again later.'

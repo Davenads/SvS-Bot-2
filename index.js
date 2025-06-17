@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { initializeChallengeExpiryHandler, runSafetyCheck } = require('./challenge-expiry-handler');
+const { logError } = require('./logger');
 
 // Initialize the Discord client with the necessary intents
 const client = new Client({
@@ -72,7 +73,7 @@ client.on('interactionCreate', async interaction => {
             // Execute the command
             await command.execute(interaction);
         } catch (error) {
-            console.error(error);
+            logError('Error executing slash command', error);
             // Respond with an error message if command execution fails
             await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
         }
@@ -89,7 +90,7 @@ client.on('interactionCreate', async interaction => {
             // Execute the autocomplete handler
             await command.autocomplete(interaction);
         } catch (error) {
-            console.error(error);
+            logError('Error in autocomplete handler', error);
         }
     }
 });
