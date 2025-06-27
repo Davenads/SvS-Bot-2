@@ -129,12 +129,53 @@ class RedisClient extends EventEmitter {
         }
     }
 
+    // Calculate TTL based on challenge date from Google Sheets
+    // Format: "6/25, 12:40 AM EDT" -> TTL in seconds until 3 days from that date
+    calculateTTLFromChallengeDate(challengeDateStr) {
+        try {
+            // Parse the challenge date string
+            // Format examples: "6/25, 12:40 AM EDT", "12/1, 3:15 PM EST"
+            const currentYear = new Date().getFullYear();
+            
+            // Remove timezone and parse
+            const dateStr = challengeDateStr.replace(/ (EDT|EST|PST|PDT|CST|CDT|MST|MDT)$/, '');
+            const challengeDate = new Date(`${dateStr}, ${currentYear}`);
+            
+            // If the parsed date is invalid, fall back to current time
+            if (isNaN(challengeDate.getTime())) {
+                console.log(`Warning: Could not parse challenge date "${challengeDateStr}", using current time`);
+                return 3 * 24 * 60 * 60; // 3 days from now
+            }
+            
+            // Calculate expiration: challenge date + 3 days
+            const expirationDate = new Date(challengeDate.getTime() + (3 * 24 * 60 * 60 * 1000));
+            
+            // Calculate TTL: seconds from now until expiration
+            const ttlMs = expirationDate.getTime() - Date.now();
+            const ttlSeconds = Math.max(300, Math.floor(ttlMs / 1000)); // Minimum 5 minutes
+            
+            console.log(`Challenge date: ${challengeDate.toISOString()}, expires: ${expirationDate.toISOString()}, TTL: ${ttlSeconds}s`);
+            return ttlSeconds;
+            
+        } catch (error) {
+            console.error(`Error parsing challenge date "${challengeDateStr}":`, error);
+            return 3 * 24 * 60 * 60; // Fallback to 3 days
+        }
+    }
+
     async setChallenge(player1, player2, challengeDate) {
         const key = this.generateChallengeKey(player1.rank, player2.rank);
-        // 3 days expiry (259,200 seconds)
-        const expiryTime = 3 * 24 * 60 * 60;
-        // 24 hours before expiration (for warning) - 2 days
-        const warningTime = 2 * 24 * 60 * 60;
+        
+        let expiryTime;
+        if (challengeDate) {
+            // Parse challenge date and calculate TTL based on 3-day expiration from that date
+            expiryTime = this.calculateTTLFromChallengeDate(challengeDate);
+        } else {
+            // Fallback to default 3 days
+            expiryTime = 3 * 24 * 60 * 60;
+        }
+        // Warning time: 24 hours before expiration, but minimum 300 seconds (5 minutes)
+        const warningTime = Math.max(300, expiryTime - (24 * 60 * 60));
         
         const challengeData = JSON.stringify({
             player1: {
