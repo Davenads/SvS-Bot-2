@@ -421,18 +421,27 @@ module.exports = {
             const allChallenges = await redisClient.getAllChallenges();
             console.log(`├─ Found ${allChallenges.length} existing challenge keys in Redis`);
             
-            // Create a lookup map of Discord ID to current rank from Google Sheets
-            const discordIdToRank = {};
+            // Create lookup maps for character identification
+            // Since users can have up to 3 characters, we need to match by character name + Discord ID
+            const characterNameToRank = {}; // "CharacterName" -> rank
+            const discordIdAndNameToRank = {}; // "discordId:CharacterName" -> rank
             const rankToPlayerData = {};
             
             sheetRows.forEach(row => {
-                if (row[0] && row[8]) { // rank and discordId
+                if (row[0] && row[1] && row[8]) { // rank, name, and discordId
                     const rank = row[0];
+                    const characterName = row[1];
                     const discordId = row[8];
-                    discordIdToRank[discordId] = rank;
+                    
+                    // Map character name to rank (primary lookup)
+                    characterNameToRank[characterName] = rank;
+                    
+                    // Map discordId:characterName combination to rank (backup lookup)
+                    discordIdAndNameToRank[`${discordId}:${characterName}`] = rank;
+                    
                     rankToPlayerData[rank] = {
                         rank: rank,
-                        name: row[1],
+                        name: characterName,
                         spec: row[2],
                         element: row[3],
                         discUser: row[4],
@@ -449,31 +458,43 @@ module.exports = {
                 const player1 = challenge.player1;
                 const player2 = challenge.player2;
                 
-                // Get current ranks from Google Sheets
-                const currentRank1 = discordIdToRank[player1.discordId];
-                const currentRank2 = discordIdToRank[player2.discordId];
+                // Find current ranks using character name (primary) or discordId:name (backup)
+                let currentRank1 = characterNameToRank[player1.name];
+                let currentRank2 = characterNameToRank[player2.name];
                 
-                // Check if ranks have changed
-                const rank1Changed = currentRank1 && currentRank1 !== player1.rank;
-                const rank2Changed = currentRank2 && currentRank2 !== player2.rank;
+                // Backup lookup if character name alone doesn't work (handle name changes)
+                if (!currentRank1) {
+                    currentRank1 = discordIdAndNameToRank[`${player1.discordId}:${player1.name}`];
+                }
+                if (!currentRank2) {
+                    currentRank2 = discordIdAndNameToRank[`${player2.discordId}:${player2.name}`];
+                }
+                
+                // Check if ranks have changed (convert to strings for comparison)
+                const rank1Changed = currentRank1 && String(currentRank1) !== String(player1.rank);
+                const rank2Changed = currentRank2 && String(currentRank2) !== String(player2.rank);
+                
+                // Handle missing characters
+                if (!currentRank1 || !currentRank2) {
+                    console.log(`├─ CHARACTER NOT FOUND: ${challenge.key}`);
+                    console.log(`├─   Player 1: ${player1.name} (${player1.discordId}) - found rank: ${currentRank1 || 'NOT FOUND'}`);
+                    console.log(`├─   Player 2: ${player2.name} (${player2.discordId}) - found rank: ${currentRank2 || 'NOT FOUND'}`);
+                    
+                    results.push({
+                        status: 'error',
+                        oldKey: challenge.key,
+                        newKey: null,
+                        reason: 'Character(s) no longer on ladder',
+                        player1: player1.name,
+                        player2: player2.name
+                    });
+                    continue;
+                }
                 
                 if (rank1Changed || rank2Changed) {
                     console.log(`├─ BROKEN KEY DETECTED: ${challenge.key}`);
                     console.log(`├─   Player 1: ${player1.name} stored rank ${player1.rank} → current rank ${currentRank1}`);
                     console.log(`├─   Player 2: ${player2.name} stored rank ${player2.rank} → current rank ${currentRank2}`);
-                    
-                    if (!currentRank1 || !currentRank2) {
-                        // Player(s) no longer on ladder
-                        results.push({
-                            status: 'error',
-                            oldKey: challenge.key,
-                            newKey: null,
-                            reason: 'Player(s) no longer on ladder',
-                            player1: player1.name,
-                            player2: player2.name
-                        });
-                        continue;
-                    }
                     
                     // Generate new key with current ranks
                     const newKey = redisClient.generateChallengeKey(currentRank1, currentRank2);
