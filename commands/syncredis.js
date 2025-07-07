@@ -37,6 +37,11 @@ module.exports = {
             option.setName('clear_cooldowns')
                 .setDescription('Clear all player cooldowns (use when reverting matches)')
                 .setRequired(false)
+        )
+        .addBooleanOption(option =>
+            option.setName('fix_broken_keys')
+                .setDescription('Fix Redis challenge keys that have outdated rank numbers after manual rank shifts')
+                .setRequired(false)
         ),
 
     async execute(interaction) {
@@ -58,8 +63,9 @@ module.exports = {
         const dryRun = interaction.options.getBoolean('dry_run') || false;
         const showCooldowns = interaction.options.getBoolean('show_cooldowns') || false;
         const clearCooldowns = interaction.options.getBoolean('clear_cooldowns') || false;
+        const fixBrokenKeys = interaction.options.getBoolean('fix_broken_keys') || false;
 
-        console.log(`├─ Options: force=${force}, dry_run=${dryRun}, show_cooldowns=${showCooldowns}, clear_cooldowns=${clearCooldowns}`);
+        console.log(`├─ Options: force=${force}, dry_run=${dryRun}, show_cooldowns=${showCooldowns}, clear_cooldowns=${clearCooldowns}, fix_broken_keys=${fixBrokenKeys}`);
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -86,6 +92,16 @@ module.exports = {
 
             const rows = result.data.values || [];
             console.log(`├─ Found ${rows.length} total rows in spreadsheet`);
+
+            // Handle broken key fixing if requested
+            let brokenKeyResults = [];
+            if (fixBrokenKeys) {
+                console.log('├─ Processing broken key fixes...');
+                await interaction.editReply({ content: '🔄 Analyzing Redis keys for rank mismatches...' });
+                
+                brokenKeyResults = await this.fixBrokenChallengeKeys(rows, dryRun);
+                console.log(`├─ Broken key analysis complete: ${brokenKeyResults.length} issues found`);
+            }
 
             // Handle cooldown operations first
             if (showCooldowns || clearCooldowns) {
@@ -353,6 +369,28 @@ module.exports = {
 
             console.log(`└─ Sync command completed: ${syncedCount} synced, ${existingCount} existed, ${skippedCount} errors`);
 
+            // Add broken key results to embed if applicable
+            if (fixBrokenKeys && brokenKeyResults.length > 0) {
+                const brokenKeyText = brokenKeyResults
+                    .slice(0, 8) // Limit to avoid embed length issues
+                    .map(r => {
+                        const statusEmoji = {
+                            'fixed': '🔧',
+                            'would_fix': '🔍',
+                            'no_fix_needed': '✅',
+                            'error': '❌'
+                        }[r.status] || '❓';
+                        return `${statusEmoji} ${r.oldKey} → ${r.newKey || 'N/A'}`;
+                    })
+                    .join('\n');
+                
+                embed.addFields({
+                    name: `🔧 Broken Key ${dryRun ? 'Analysis' : 'Fixes'} (${brokenKeyResults.length})`,
+                    value: brokenKeyText + (brokenKeyResults.length > 8 ? `\n... and ${brokenKeyResults.length - 8} more` : ''),
+                    inline: false
+                });
+            }
+
             // Collect all embeds to send
             const embeds = [embed];
             if (interaction.cooldownEmbed) embeds.push(interaction.cooldownEmbed);
@@ -373,4 +411,168 @@ module.exports = {
             await interaction.editReply({ embeds: [errorEmbed] });
         }
     },
+
+    // Helper method to fix broken challenge keys after rank shifts
+    async fixBrokenChallengeKeys(sheetRows, dryRun = false) {
+        const results = [];
+        
+        try {
+            // Get all existing challenge keys from Redis
+            const allChallenges = await redisClient.getAllChallenges();
+            console.log(`├─ Found ${allChallenges.length} existing challenge keys in Redis`);
+            
+            // Create a lookup map of Discord ID to current rank from Google Sheets
+            const discordIdToRank = {};
+            const rankToPlayerData = {};
+            
+            sheetRows.forEach(row => {
+                if (row[0] && row[8]) { // rank and discordId
+                    const rank = row[0];
+                    const discordId = row[8];
+                    discordIdToRank[discordId] = rank;
+                    rankToPlayerData[rank] = {
+                        rank: rank,
+                        name: row[1],
+                        spec: row[2],
+                        element: row[3],
+                        discUser: row[4],
+                        status: row[5],
+                        challengeDate: row[6],
+                        opponentRank: row[7],
+                        discordId: discordId
+                    };
+                }
+            });
+            
+            // Analyze each challenge key
+            for (const challenge of allChallenges) {
+                const player1 = challenge.player1;
+                const player2 = challenge.player2;
+                
+                // Get current ranks from Google Sheets
+                const currentRank1 = discordIdToRank[player1.discordId];
+                const currentRank2 = discordIdToRank[player2.discordId];
+                
+                // Check if ranks have changed
+                const rank1Changed = currentRank1 && currentRank1 !== player1.rank;
+                const rank2Changed = currentRank2 && currentRank2 !== player2.rank;
+                
+                if (rank1Changed || rank2Changed) {
+                    console.log(`├─ BROKEN KEY DETECTED: ${challenge.key}`);
+                    console.log(`├─   Player 1: ${player1.name} stored rank ${player1.rank} → current rank ${currentRank1}`);
+                    console.log(`├─   Player 2: ${player2.name} stored rank ${player2.rank} → current rank ${currentRank2}`);
+                    
+                    if (!currentRank1 || !currentRank2) {
+                        // Player(s) no longer on ladder
+                        results.push({
+                            status: 'error',
+                            oldKey: challenge.key,
+                            newKey: null,
+                            reason: 'Player(s) no longer on ladder',
+                            player1: player1.name,
+                            player2: player2.name
+                        });
+                        continue;
+                    }
+                    
+                    // Generate new key with current ranks
+                    const newKey = redisClient.generateChallengeKey(currentRank1, currentRank2);
+                    
+                    if (dryRun) {
+                        results.push({
+                            status: 'would_fix',
+                            oldKey: challenge.key,
+                            newKey: newKey,
+                            reason: 'Rank mismatch detected',
+                            player1: `${player1.name} (${player1.rank}→${currentRank1})`,
+                            player2: `${player2.name} (${player2.rank}→${currentRank2})`
+                        });
+                    } else {
+                        // Fix the broken key
+                        try {
+                            // Get current TTL and challenge data
+                            const challengeData = challenge;
+                            const currentTTL = challenge.remainingTime;
+                            
+                            // Update player ranks in the data
+                            const updatedData = {
+                                ...challengeData,
+                                player1: {
+                                    ...challengeData.player1,
+                                    rank: currentRank1
+                                },
+                                player2: {
+                                    ...challengeData.player2,
+                                    rank: currentRank2
+                                }
+                            };
+                            
+                            // Remove old key and warning key
+                            await redisClient.client.del(challenge.key);
+                            const oldWarningKey = `challenge-warning:${challenge.key.substring(10)}`;
+                            await redisClient.client.del(oldWarningKey);
+                            
+                            // Create new key with corrected ranks
+                            const challengeDataStr = JSON.stringify(updatedData);
+                            await redisClient.client.setex(newKey, Math.max(300, currentTTL), challengeDataStr);
+                            
+                            // Create new warning key
+                            const warningTTL = Math.max(60, currentTTL - (24 * 60 * 60));
+                            const newWarningKey = `challenge-warning:${newKey.substring(10)}`;
+                            await redisClient.client.setex(newWarningKey, warningTTL, newKey);
+                            
+                            console.log(`├─ FIXED: ${challenge.key} → ${newKey}`);
+                            
+                            results.push({
+                                status: 'fixed',
+                                oldKey: challenge.key,
+                                newKey: newKey,
+                                reason: 'Successfully updated ranks',
+                                player1: `${player1.name} (${player1.rank}→${currentRank1})`,
+                                player2: `${player2.name} (${player2.rank}→${currentRank2})`
+                            });
+                            
+                        } catch (fixError) {
+                            console.error(`├─ ERROR fixing ${challenge.key}:`, fixError);
+                            results.push({
+                                status: 'error',
+                                oldKey: challenge.key,
+                                newKey: newKey,
+                                reason: `Fix failed: ${fixError.message}`,
+                                player1: player1.name,
+                                player2: player2.name
+                            });
+                        }
+                    }
+                } else {
+                    // Key is correct, no changes needed
+                    results.push({
+                        status: 'no_fix_needed',
+                        oldKey: challenge.key,
+                        newKey: null,
+                        reason: 'Ranks match current ladder',
+                        player1: player1.name,
+                        player2: player2.name
+                    });
+                }
+            }
+            
+            const issuesFound = results.filter(r => r.status !== 'no_fix_needed').length;
+            console.log(`├─ Broken key analysis complete: ${issuesFound} issues found, ${results.length} total keys checked`);
+            
+            return results;
+            
+        } catch (error) {
+            console.error('├─ Error in fixBrokenChallengeKeys:', error);
+            logError('Error fixing broken challenge keys', error);
+            return [{
+                status: 'error',
+                oldKey: 'N/A',
+                newKey: null,
+                reason: `Analysis failed: ${error.message}`,
+                player1: 'N/A',
+                player2: 'N/A'
+            }];
+        }
+    }
 };
