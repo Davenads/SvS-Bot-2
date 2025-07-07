@@ -470,9 +470,16 @@ module.exports = {
                     currentRank2 = discordIdAndNameToRank[`${player2.discordId}:${player2.name}`];
                 }
                 
-                // Check if ranks have changed (convert to strings for comparison)
-                const rank1Changed = currentRank1 && String(currentRank1) !== String(player1.rank);
-                const rank2Changed = currentRank2 && String(currentRank2) !== String(player2.rank);
+                // Debug logging for rank comparison
+                console.log(`├─ COMPARING ${challenge.key}:`);
+                console.log(`├─   Player 1: '${player1.name}' Redis[${typeof player1.rank}]:'${player1.rank}' vs Sheets[${typeof currentRank1}]:'${currentRank1}'`);
+                console.log(`├─   Player 2: '${player2.name}' Redis[${typeof player2.rank}]:'${player2.rank}' vs Sheets[${typeof currentRank2}]:'${currentRank2}'`);
+                
+                // Check if ranks have changed (normalize to integers for comparison)
+                const rank1Changed = currentRank1 && parseInt(currentRank1) !== parseInt(player1.rank);
+                const rank2Changed = currentRank2 && parseInt(currentRank2) !== parseInt(player2.rank);
+                
+                console.log(`├─   Changes: rank1Changed=${rank1Changed}, rank2Changed=${rank2Changed}`);
                 
                 // Handle missing characters
                 if (!currentRank1 || !currentRank2) {
