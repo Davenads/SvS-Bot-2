@@ -371,24 +371,35 @@ module.exports = {
 
             // Add broken key results to embed if applicable
             if (fixBrokenKeys && brokenKeyResults.length > 0) {
-                const brokenKeyText = brokenKeyResults
-                    .slice(0, 8) // Limit to avoid embed length issues
-                    .map(r => {
-                        const statusEmoji = {
-                            'fixed': '🔧',
-                            'would_fix': '🔍',
-                            'no_fix_needed': '✅',
-                            'error': '❌'
-                        }[r.status] || '❓';
-                        return `${statusEmoji} ${r.oldKey} → ${r.newKey || 'N/A'}`;
-                    })
-                    .join('\n');
+                // Filter to only show keys that need fixing or have errors (exclude 'no_fix_needed')
+                const brokenKeysOnly = brokenKeyResults.filter(r => r.status !== 'no_fix_needed');
                 
-                embed.addFields({
-                    name: `🔧 Broken Key ${dryRun ? 'Analysis' : 'Fixes'} (${brokenKeyResults.length})`,
-                    value: brokenKeyText + (brokenKeyResults.length > 8 ? `\n... and ${brokenKeyResults.length - 8} more` : ''),
-                    inline: false
-                });
+                if (brokenKeysOnly.length > 0) {
+                    const brokenKeyText = brokenKeysOnly
+                        .slice(0, 8) // Limit to avoid embed length issues
+                        .map(r => {
+                            const statusEmoji = {
+                                'fixed': '🔧',
+                                'would_fix': '🔍',
+                                'error': '❌'
+                            }[r.status] || '❓';
+                            return `${statusEmoji} ${r.oldKey} → ${r.newKey || 'N/A'}`;
+                        })
+                        .join('\n');
+                    
+                    embed.addFields({
+                        name: `🔧 Broken Key ${dryRun ? 'Analysis' : 'Fixes'} (${brokenKeysOnly.length})`,
+                        value: brokenKeyText + (brokenKeysOnly.length > 8 ? `\n... and ${brokenKeysOnly.length - 8} more` : ''),
+                        inline: false
+                    });
+                } else {
+                    // All keys are correct - show success message
+                    embed.addFields({
+                        name: `✅ Key Validation Complete`,
+                        value: `All ${brokenKeyResults.length} challenge keys have correct rank numbers. No fixes needed.`,
+                        inline: false
+                    });
+                }
             }
 
             // Collect all embeds to send
@@ -470,16 +481,9 @@ module.exports = {
                     currentRank2 = discordIdAndNameToRank[`${player2.discordId}:${player2.name}`];
                 }
                 
-                // Debug logging for rank comparison
-                console.log(`├─ COMPARING ${challenge.key}:`);
-                console.log(`├─   Player 1: '${player1.name}' Redis[${typeof player1.rank}]:'${player1.rank}' vs Sheets[${typeof currentRank1}]:'${currentRank1}'`);
-                console.log(`├─   Player 2: '${player2.name}' Redis[${typeof player2.rank}]:'${player2.rank}' vs Sheets[${typeof currentRank2}]:'${currentRank2}'`);
-                
                 // Check if ranks have changed (normalize to integers for comparison)
                 const rank1Changed = currentRank1 && parseInt(currentRank1) !== parseInt(player1.rank);
                 const rank2Changed = currentRank2 && parseInt(currentRank2) !== parseInt(player2.rank);
-                
-                console.log(`├─   Changes: rank1Changed=${rank1Changed}, rank2Changed=${rank2Changed}`);
                 
                 // Handle missing characters
                 if (!currentRank1 || !currentRank2) {
