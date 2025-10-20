@@ -19,14 +19,8 @@ module.exports = {
         .setDescription('Randomly shuffle player positions on the SvS ladder (Manager only)')
         .addBooleanOption(option =>
             option
-                .setName('clear_challenges')
-                .setDescription('Reset all active challenges to Available status')
-                .setRequired(false)
-        )
-        .addBooleanOption(option =>
-            option
                 .setName('clear_cooldowns')
-                .setDescription('Remove all cooldown restrictions between players')
+                .setDescription('Remove all cooldown restrictions between players (default: false)')
                 .setRequired(false)
         ),
 
@@ -50,10 +44,9 @@ module.exports = {
             });
         }
 
-        const clearChallenges = interaction.options.getBoolean('clear_challenges') ?? false;
         const clearCooldowns = interaction.options.getBoolean('clear_cooldowns') ?? false;
 
-        console.log(`├─ Options: clear_challenges=${clearChallenges}, clear_cooldowns=${clearCooldowns}`);
+        console.log(`├─ Options: clear_cooldowns=${clearCooldowns}`);
 
         try {
             // Check Redis connection before starting
@@ -132,75 +125,22 @@ module.exports = {
             console.log(`├─ Shuffle complete, ranks reassigned`);
 
             // ======================
-            // Phase 3: Handle challenges
+            // Phase 3: Clear all challenges
             // ======================
-            console.log('├─ Phase 3: Processing challenges...');
-            await interaction.editReply({ content: '⚔️ Processing challenges...' });
+            console.log('├─ Phase 3: Clearing all challenges...');
+            await interaction.editReply({ content: '⚔️ Clearing all challenges...' });
 
-            const challengeUpdates = [];
+            let challengesCleared = 0;
+            rows.forEach(row => {
+                if (row[5] === 'Challenge') {
+                    row[5] = 'Available'; // Status
+                    row[6] = ''; // cDate
+                    row[7] = ''; // Opp#
+                    challengesCleared++;
+                }
+            });
 
-            if (clearChallenges) {
-                // Clear all challenges
-                console.log('├─ Clearing all challenges...');
-                rows.forEach(row => {
-                    if (row[5] === 'Challenge') {
-                        row[5] = 'Available'; // Status
-                        row[6] = ''; // cDate
-                        row[7] = ''; // Opp#
-                    }
-                });
-            } else {
-                // Preserve challenges and update opponent ranks
-                console.log('├─ Preserving challenges and updating opponent ranks...');
-
-                // First, build a map of current ranks to find opponents
-                const currentRankMap = {};
-                rows.forEach(row => {
-                    currentRankMap[row[0]] = row;
-                });
-
-                rows.forEach(row => {
-                    if (row[5] === 'Challenge' && row[7]) {
-                        const currentRank = parseInt(row[0]);
-                        const oldOpponentRank = row[7];
-
-                        // Find what the opponent's new rank is
-                        const opponentNewRank = rankMapping[oldOpponentRank]?.newRank;
-
-                        if (opponentNewRank) {
-                            // Check if opponent still exists and is in challenge
-                            const opponentRow = currentRankMap[opponentNewRank];
-
-                            if (opponentRow && opponentRow[5] === 'Challenge') {
-                                // Update opponent rank reference
-                                row[7] = opponentNewRank;
-
-                                challengeUpdates.push({
-                                    player: row[4], // DiscUser
-                                    playerRank: currentRank,
-                                    opponent: rankMapping[oldOpponentRank].name,
-                                    opponentOldRank: oldOpponentRank,
-                                    opponentNewRank: opponentNewRank
-                                });
-                            } else {
-                                // Opponent not in challenge anymore - clear this player's challenge
-                                console.log(`├─ Clearing orphaned challenge for player at rank ${currentRank}`);
-                                row[5] = 'Available';
-                                row[6] = '';
-                                row[7] = '';
-                            }
-                        } else {
-                            // Opponent no longer exists - clear challenge
-                            console.log(`├─ Clearing challenge with missing opponent for player at rank ${currentRank}`);
-                            row[5] = 'Available';
-                            row[6] = '';
-                            row[7] = '';
-                        }
-                    }
-                });
-
-                console.log(`├─ Updated ${challengeUpdates.length} active challenges`);
-            }
+            console.log(`├─ Cleared ${challengesCleared} active challenges`);
 
             // ======================
             // Phase 4: Update Google Sheets
@@ -233,87 +173,15 @@ module.exports = {
             let challengeKeysProcessed = 0;
             let cooldownKeysProcessed = 0;
 
-            // Phase 5A/5B: Handle challenge Redis keys
-            if (clearChallenges) {
-                console.log('├─ Clearing all Redis challenge keys...');
-                const challengeKeys = await redisClient.client.keys('challenge*');
-                if (challengeKeys.length > 0) {
-                    await redisClient.client.del(...challengeKeys);
-                    challengeKeysProcessed = challengeKeys.length;
-                    console.log(`├─ Deleted ${challengeKeys.length} challenge keys`);
-                }
+            // Phase 5A: Clear all challenge Redis keys
+            console.log('├─ Clearing all Redis challenge keys...');
+            const challengeKeys = await redisClient.client.keys('challenge*');
+            if (challengeKeys.length > 0) {
+                await redisClient.client.del(...challengeKeys);
+                challengeKeysProcessed = challengeKeys.length;
+                console.log(`├─ Deleted ${challengeKeys.length} challenge keys`);
             } else {
-                console.log('├─ Updating Redis challenge keys with new ranks...');
-                const challengeKeys = await redisClient.client.keys('challenge:*');
-
-                for (const oldKey of challengeKeys) {
-                    // Skip warning keys - we'll handle them with their parent challenge
-                    if (oldKey.includes('challenge-warning:')) continue;
-
-                    try {
-                        // Get challenge data and TTL
-                        const challengeData = await redisClient.client.get(oldKey);
-                        const ttl = await redisClient.client.ttl(oldKey);
-
-                        if (!challengeData || ttl < 0) {
-                            // Expired or missing - delete
-                            await redisClient.client.del(oldKey);
-                            challengeKeysProcessed++;
-                            continue;
-                        }
-
-                        const data = JSON.parse(challengeData);
-
-                        // Get old ranks from data
-                        const oldRank1 = data.player1.rank;
-                        const oldRank2 = data.player2.rank;
-
-                        // Look up new ranks
-                        const newRank1 = rankMapping[oldRank1]?.newRank;
-                        const newRank2 = rankMapping[oldRank2]?.newRank;
-
-                        if (!newRank1 || !newRank2) {
-                            // Player(s) no longer exist - delete challenge
-                            await redisClient.client.del(oldKey);
-                            const warningKey = oldKey.replace('challenge:', 'challenge-warning:');
-                            await redisClient.client.del(warningKey);
-                            challengeKeysProcessed++;
-                            continue;
-                        }
-
-                        // Update data with new ranks
-                        data.player1.rank = parseInt(newRank1);
-                        data.player2.rank = parseInt(newRank2);
-
-                        // Create new key with updated ranks
-                        const newKey = redisClient.generateChallengeKey(newRank1, newRank2);
-
-                        if (oldKey !== newKey) {
-                            // Set new key with preserved TTL
-                            await redisClient.client.setex(newKey, ttl, JSON.stringify(data));
-
-                            // Delete old key
-                            await redisClient.client.del(oldKey);
-
-                            // Update warning key
-                            const oldWarningKey = oldKey.replace('challenge:', 'challenge-warning:');
-                            const newWarningKey = newKey.replace('challenge:', 'challenge-warning:');
-                            const warningTTL = await redisClient.client.ttl(oldWarningKey);
-
-                            if (warningTTL > 0) {
-                                await redisClient.client.setex(newWarningKey, warningTTL, newKey);
-                                await redisClient.client.del(oldWarningKey);
-                            }
-
-                            challengeKeysProcessed++;
-                        }
-                    } catch (error) {
-                        console.error(`├─ Error processing challenge key ${oldKey}:`, error.message);
-                        // Continue with next key
-                    }
-                }
-
-                console.log(`├─ Processed ${challengeKeysProcessed} challenge keys`);
+                console.log('├─ No challenge keys found in Redis');
             }
 
             // Phase 5C/5D: Handle cooldown Redis keys
@@ -365,28 +233,25 @@ module.exports = {
             await interaction.editReply({ content: '✅ Verifying synchronization...' });
 
             const verificationResults = {
-                sheetChallenges: 0,
-                redisChallenges: 0,
                 discrepancies: []
             };
 
-            if (!clearChallenges) {
-                // Count challenges in sheet
-                verificationResults.sheetChallenges = rows.filter(row => row[5] === 'Challenge').length;
+            // Verify all challenges were cleared
+            const remainingChallenges = rows.filter(row => row[5] === 'Challenge').length;
+            const remainingRedisChallenges = await redisClient.getAllChallenges();
 
-                // Count challenges in Redis
-                const allRedisChallenges = await redisClient.getAllChallenges();
-                verificationResults.redisChallenges = allRedisChallenges.length;
+            if (remainingChallenges > 0) {
+                console.log(`├─ ⚠️ Warning: ${remainingChallenges} challenged players still in sheet`);
+                verificationResults.discrepancies.push('Challenges not fully cleared in sheet');
+            }
 
-                // Basic sanity check
-                const expectedRedisChallenges = verificationResults.sheetChallenges / 2; // Each challenge = 2 sheet rows, 1 Redis key
+            if (remainingRedisChallenges.length > 0) {
+                console.log(`├─ ⚠️ Warning: ${remainingRedisChallenges.length} challenge keys still in Redis`);
+                verificationResults.discrepancies.push('Challenge keys not fully cleared in Redis');
+            }
 
-                if (verificationResults.redisChallenges !== expectedRedisChallenges) {
-                    console.log(`├─ ⚠️ Challenge count mismatch: Sheet has ${verificationResults.sheetChallenges} challenged players, Redis has ${verificationResults.redisChallenges} keys (expected ${expectedRedisChallenges})`);
-                    verificationResults.discrepancies.push('Challenge count mismatch detected');
-                } else {
-                    console.log(`├─ ✅ Challenge counts match: ${verificationResults.redisChallenges} challenges in sync`);
-                }
+            if (remainingChallenges === 0 && remainingRedisChallenges.length === 0) {
+                console.log(`├─ ✅ All challenges cleared successfully`);
             }
 
             // ======================
@@ -402,32 +267,18 @@ module.exports = {
                 .setDescription(
                     `The SvS ladder has been randomly shuffled! All player positions have been reorganized.\n\n` +
                     `**Settings:**\n` +
-                    `🔄 Challenges: ${clearChallenges ? 'Cleared' : 'Preserved'}\n` +
+                    `🔄 Challenges: Cleared (all set to Available)\n` +
                     `⏱️ Cooldowns: ${clearCooldowns ? 'Cleared' : 'Preserved'}\n\n` +
                     `**Statistics:**\n` +
                     `👥 Players shuffled: ${rows.length}\n` +
-                    `${!clearChallenges ? `⚔️ Redis challenges synced: ${verificationResults.redisChallenges}\n` : ''}` +
-                    `${verificationResults.discrepancies.length > 0 ? `⚠️ Minor sync issues detected (auto-handled)\n` : '✅ Sheet and Redis fully synchronized'}`
+                    `⚔️ Challenges cleared: ${challengesCleared}\n` +
+                    `${verificationResults.discrepancies.length > 0 ? `⚠️ Minor sync issues detected (check logs)\n` : '✅ Sheet and Redis fully synchronized'}`
                 )
                 .setFooter({
                     text: `Shuffle requested by ${interaction.user.username}`,
                     iconURL: interaction.client.user.displayAvatarURL()
                 })
                 .setTimestamp();
-
-            // If challenges preserved, show updates
-            if (!clearChallenges && challengeUpdates.length > 0) {
-                const updatesPreview = challengeUpdates.slice(0, 5); // Show first 5
-                const hasMore = challengeUpdates.length > 5;
-
-                embed.addFields({
-                    name: '⚠️ Active Challenges Updated',
-                    value: updatesPreview.map(update =>
-                        `**${update.player}** vs **${update.opponent}** ` +
-                        `(Opponent rank: ${update.opponentOldRank} → ${update.opponentNewRank})`
-                    ).join('\n') + (hasMore ? `\n...and ${challengeUpdates.length - 5} more` : '')
-                });
-            }
 
             // Send embed to channel (public announcement)
             await interaction.channel.send({ embeds: [embed] });
@@ -441,8 +292,8 @@ module.exports = {
 
             // Final logging
             console.log(`├─ Players shuffled: ${rows.length}`);
-            console.log(`├─ Active challenges affected: ${challengeUpdates.length}`);
-            console.log(`├─ Redis challenge keys processed: ${challengeKeysProcessed}`);
+            console.log(`├─ Challenges cleared: ${challengesCleared}`);
+            console.log(`├─ Redis challenge keys deleted: ${challengeKeysProcessed}`);
             console.log(`├─ Redis cooldown keys ${clearCooldowns ? 'cleared' : 'verified'}: ${cooldownKeysProcessed}`);
             console.log(`├─ Verification: ${verificationResults.discrepancies.length} discrepancies found`);
             console.log(`└─ Shuffle completed successfully`);
