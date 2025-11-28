@@ -37,6 +37,14 @@ class RedisClient extends EventEmitter {
     constructor() {
         super();
 
+        // Skip Redis initialization if explicitly disabled (useful for deploy-commands.js)
+        if (process.env.SKIP_REDIS_INIT === 'true') {
+            console.log('Redis initialization skipped (SKIP_REDIS_INIT=true)');
+            this.client = null;
+            this.subClient = null;
+            return;
+        }
+
         // Configure Redis clients based on environment
         const redisConfig = this.getRedisConfig();
 
