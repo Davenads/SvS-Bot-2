@@ -42,6 +42,11 @@ module.exports = {
             option.setName('fix_broken_keys')
                 .setDescription('Fix Redis challenge keys that have outdated rank numbers after manual rank shifts')
                 .setRequired(false)
+        )
+        .addBooleanOption(option =>
+            option.setName('recalculate_ttl')
+                .setDescription('Recalculate challenge expiration times from cDate column')
+                .setRequired(false)
         ),
 
     async execute(interaction) {
@@ -64,8 +69,9 @@ module.exports = {
         const showCooldowns = interaction.options.getBoolean('show_cooldowns') || false;
         const clearCooldowns = interaction.options.getBoolean('clear_cooldowns') || false;
         const fixBrokenKeys = interaction.options.getBoolean('fix_broken_keys') || false;
+        const recalculateTTL = interaction.options.getBoolean('recalculate_ttl') || false;
 
-        console.log(`├─ Options: force=${force}, dry_run=${dryRun}, show_cooldowns=${showCooldowns}, clear_cooldowns=${clearCooldowns}, fix_broken_keys=${fixBrokenKeys}`);
+        console.log(`├─ Options: force=${force}, dry_run=${dryRun}, show_cooldowns=${showCooldowns}, clear_cooldowns=${clearCooldowns}, fix_broken_keys=${fixBrokenKeys}, recalculate_ttl=${recalculateTTL}`);
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -98,9 +104,20 @@ module.exports = {
             if (fixBrokenKeys) {
                 console.log('├─ Processing broken key fixes...');
                 await interaction.editReply({ content: '🔄 Analyzing Redis keys for rank mismatches...' });
-                
-                brokenKeyResults = await this.fixBrokenChallengeKeys(rows, dryRun);
+
+                brokenKeyResults = await this.fixBrokenChallengeKeys(rows, dryRun, recalculateTTL);
                 console.log(`├─ Broken key analysis complete: ${brokenKeyResults.length} issues found`);
+            }
+
+            // Handle TTL recalculation if requested (can be standalone or combined)
+            let ttlResults = [];
+            if (recalculateTTL && !fixBrokenKeys) {
+                // Standalone TTL recalculation (not combined with broken key fixes)
+                console.log('├─ Processing standalone TTL recalculation...');
+                await interaction.editReply({ content: '🔄 Recalculating challenge expiration times...' });
+
+                ttlResults = await this.recalculateAllChallengeTTLs(rows, dryRun);
+                console.log(`├─ TTL recalculation complete: ${ttlResults.length} challenges processed`);
             }
 
             // Handle cooldown operations first
@@ -301,11 +318,11 @@ module.exports = {
             // Create response embed
             const embed = new EmbedBuilder()
                 .setColor(dryRun ? '#FFA500' : (syncedCount > 0 ? '#00FF00' : '#FFFF00'))
-                .setTitle(`${dryRun ? '🔍 Redis Sync Preview' : '✅ Redis Sync Complete'}${showCooldowns || clearCooldowns ? ' + Cooldowns' : ''}`)
+                .setTitle(`${dryRun ? '🔍 Redis Sync Preview' : '✅ Redis Sync Complete'}${showCooldowns || clearCooldowns ? ' + Cooldowns' : ''}${recalculateTTL ? ' + TTL Sync' : ''}`)
                 .setDescription(
-                    dryRun 
-                        ? `Preview of what would be synced to Redis:${showCooldowns || clearCooldowns ? ' (including cooldown operations)' : ''}`
-                        : `Sync operation completed successfully!${showCooldowns || clearCooldowns ? ' (including cooldown operations)' : ''}`
+                    dryRun
+                        ? `Preview of what would be synced to Redis:${showCooldowns || clearCooldowns ? ' (including cooldown operations)' : ''}${recalculateTTL ? ' (including TTL recalculation)' : ''}`
+                        : `Sync operation completed successfully!${showCooldowns || clearCooldowns ? ' (including cooldown operations)' : ''}${recalculateTTL ? ' (including TTL recalculation)' : ''}`
                 )
                 .addFields(
                     { name: '📊 Statistics', value: 
@@ -373,7 +390,7 @@ module.exports = {
             if (fixBrokenKeys && brokenKeyResults.length > 0) {
                 // Filter to only show keys that need fixing or have errors (exclude 'no_fix_needed')
                 const brokenKeysOnly = brokenKeyResults.filter(r => r.status !== 'no_fix_needed');
-                
+
                 if (brokenKeysOnly.length > 0) {
                     const brokenKeyText = brokenKeysOnly
                         .slice(0, 8) // Limit to avoid embed length issues
@@ -386,7 +403,7 @@ module.exports = {
                             return `${statusEmoji} ${r.oldKey} → ${r.newKey || 'N/A'}`;
                         })
                         .join('\n');
-                    
+
                     embed.addFields({
                         name: `🔧 Broken Key ${dryRun ? 'Analysis' : 'Fixes'} (${brokenKeysOnly.length})`,
                         value: brokenKeyText + (brokenKeysOnly.length > 8 ? `\n... and ${brokenKeysOnly.length - 8} more` : ''),
@@ -397,6 +414,29 @@ module.exports = {
                     embed.addFields({
                         name: `✅ Key Validation Complete`,
                         value: `All ${brokenKeyResults.length} challenge keys have correct rank numbers. No fixes needed.`,
+                        inline: false
+                    });
+                }
+            }
+
+            // Add TTL recalculation results if applicable
+            if (recalculateTTL && !fixBrokenKeys && ttlResults.length > 0) {
+                const ttlUpdates = ttlResults.filter(r => r.status === 'updated' || r.status === 'would_update');
+
+                if (ttlUpdates.length > 0) {
+                    const ttlText = ttlUpdates
+                        .slice(0, 8)
+                        .map(r => {
+                            const statusEmoji = r.status === 'updated' ? '✅' : '🔍';
+                            const hours1 = Math.floor(r.oldTTL / 3600);
+                            const hours2 = Math.floor(r.newTTL / 3600);
+                            return `${statusEmoji} ${r.player1} vs ${r.player2}: ${hours1}h → ${hours2}h`;
+                        })
+                        .join('\n');
+
+                    embed.addFields({
+                        name: `⏰ TTL ${dryRun ? 'Analysis' : 'Updates'} (${ttlUpdates.length})`,
+                        value: ttlText + (ttlUpdates.length > 8 ? `\n... and ${ttlUpdates.length - 8} more` : ''),
                         inline: false
                     });
                 }
@@ -424,7 +464,7 @@ module.exports = {
     },
 
     // Helper method to fix broken challenge keys after rank shifts
-    async fixBrokenChallengeKeys(sheetRows, dryRun = false) {
+    async fixBrokenChallengeKeys(sheetRows, dryRun = false, recalculateTTL = false) {
         const results = [];
         
         try {
@@ -525,7 +565,41 @@ module.exports = {
                             // Get current TTL and challenge data
                             const challengeData = challenge;
                             const currentTTL = challenge.remainingTime;
-                            
+
+                            // Determine TTL to use (recalculate or preserve)
+                            let newTTL;
+                            let ttlSource;
+
+                            if (recalculateTTL) {
+                                // Get the cDate for this challenge
+                                const player1Data = rankToPlayerData[currentRank1];
+                                const player2Data = rankToPlayerData[currentRank2];
+
+                                // Both players should have the same challengeDate, use player1's
+                                const challengeDate = player1Data?.challengeDate || player2Data?.challengeDate;
+
+                                if (challengeDate) {
+                                    newTTL = redisClient.calculateTTLFromChallengeDate(challengeDate);
+                                    ttlSource = `calculated from cDate: ${challengeDate}`;
+                                } else {
+                                    // Fallback: preserve existing TTL if no cDate available
+                                    newTTL = currentTTL;
+                                    ttlSource = 'preserved (no cDate found)';
+                                    console.log(`├─   WARNING: No cDate found for challenge, preserving TTL`);
+                                }
+                            } else {
+                                // Original behavior: preserve existing TTL
+                                newTTL = currentTTL;
+                                ttlSource = 'preserved';
+                            }
+
+                            // Log TTL changes if significant
+                            const ttlDiffSeconds = Math.abs(newTTL - currentTTL);
+                            const ttlDiffHours = ttlDiffSeconds / 3600;
+                            if (ttlDiffHours > 1) {
+                                console.log(`├─   TTL change: ${currentTTL}s → ${newTTL}s (${ttlSource})`);
+                            }
+
                             // Update player ranks in the data
                             const updatedData = {
                                 ...challengeData,
@@ -538,18 +612,18 @@ module.exports = {
                                     rank: currentRank2
                                 }
                             };
-                            
+
                             // Remove old key and warning key
                             await redisClient.client.del(challenge.key);
                             const oldWarningKey = `challenge-warning:${challenge.key.substring(10)}`;
                             await redisClient.client.del(oldWarningKey);
-                            
-                            // Create new key with corrected ranks
+
+                            // Create new key with corrected ranks and potentially recalculated TTL
                             const challengeDataStr = JSON.stringify(updatedData);
-                            await redisClient.client.setex(newKey, Math.max(300, currentTTL), challengeDataStr);
-                            
-                            // Create new warning key
-                            const warningTTL = Math.max(60, currentTTL - (24 * 60 * 60));
+                            await redisClient.client.setex(newKey, Math.max(300, newTTL), challengeDataStr);
+
+                            // Create new warning key with recalculated TTL
+                            const warningTTL = Math.max(60, newTTL - (24 * 60 * 60));
                             const newWarningKey = `challenge-warning:${newKey.substring(10)}`;
                             await redisClient.client.setex(newWarningKey, warningTTL, newKey);
                             
@@ -604,6 +678,113 @@ module.exports = {
                 reason: `Analysis failed: ${error.message}`,
                 player1: 'N/A',
                 player2: 'N/A'
+            }];
+        }
+    },
+
+    // Helper method to recalculate TTLs for all challenges without fixing keys
+    async recalculateAllChallengeTTLs(sheetRows, dryRun = false) {
+        const results = [];
+
+        try {
+            const allChallenges = await redisClient.getAllChallenges();
+            console.log(`├─ Found ${allChallenges.length} existing challenges in Redis`);
+
+            // Build rank to player data map
+            const rankToPlayerData = {};
+            sheetRows.forEach(row => {
+                if (row[0] && row[1] && row[8]) {
+                    rankToPlayerData[row[0]] = {
+                        rank: row[0],
+                        name: row[1],
+                        challengeDate: row[6],
+                        discordId: row[8]
+                    };
+                }
+            });
+
+            // Process each challenge
+            for (const challenge of allChallenges) {
+                const player1 = challenge.player1;
+                const player2 = challenge.player2;
+                const currentTTL = challenge.remainingTime;
+
+                // Get cDate from sheet
+                const player1Data = rankToPlayerData[player1.rank];
+                const challengeDate = player1Data?.challengeDate;
+
+                if (!challengeDate) {
+                    results.push({
+                        status: 'skipped',
+                        key: challenge.key,
+                        reason: 'No cDate found in sheet',
+                        player1: player1.name,
+                        player2: player2.name
+                    });
+                    continue;
+                }
+
+                // Calculate new TTL
+                const newTTL = redisClient.calculateTTLFromChallengeDate(challengeDate);
+                const ttlDiffHours = Math.abs(newTTL - currentTTL) / 3600;
+
+                if (dryRun) {
+                    results.push({
+                        status: 'would_update',
+                        key: challenge.key,
+                        oldTTL: currentTTL,
+                        newTTL: newTTL,
+                        ttlDiffHours: ttlDiffHours.toFixed(2),
+                        player1: player1.name,
+                        player2: player2.name
+                    });
+                } else {
+                    // Update the TTL
+                    try {
+                        const challengeData = await redisClient.client.get(challenge.key);
+                        const warningTTL = Math.max(60, newTTL - (24 * 60 * 60));
+
+                        // Update main challenge key
+                        await redisClient.client.setex(challenge.key, Math.max(300, newTTL), challengeData);
+
+                        // Update warning key
+                        const warningKey = `challenge-warning:${challenge.key.substring(10)}`;
+                        await redisClient.client.del(warningKey);
+                        await redisClient.client.setex(warningKey, warningTTL, challenge.key);
+
+                        console.log(`├─ Updated TTL for ${challenge.key}: ${currentTTL}s → ${newTTL}s`);
+
+                        results.push({
+                            status: 'updated',
+                            key: challenge.key,
+                            oldTTL: currentTTL,
+                            newTTL: newTTL,
+                            ttlDiffHours: ttlDiffHours.toFixed(2),
+                            player1: player1.name,
+                            player2: player2.name
+                        });
+                    } catch (error) {
+                        console.error(`├─ Error updating TTL for ${challenge.key}:`, error);
+                        results.push({
+                            status: 'error',
+                            key: challenge.key,
+                            reason: error.message,
+                            player1: player1.name,
+                            player2: player2.name
+                        });
+                    }
+                }
+            }
+
+            return results;
+
+        } catch (error) {
+            console.error('├─ Error in recalculateAllChallengeTTLs:', error);
+            logError('Error recalculating TTLs', error);
+            return [{
+                status: 'error',
+                key: 'N/A',
+                reason: `Analysis failed: ${error.message}`
             }];
         }
     }
