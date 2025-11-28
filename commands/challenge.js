@@ -100,10 +100,16 @@ module.exports = {
         return rank > targetRank && rank < challengerRank
       })
 
-      // Filter out vacation players
-      const availablePlayersBetween = playersBetween.filter(
-        row => row[5] !== 'Vacation'
-      )
+      // Filter out vacation players and challenger's own characters in Challenge status
+      const availablePlayersBetween = playersBetween.filter(row => {
+        // Filter out vacation players
+        if (row[5] === 'Vacation') return false
+
+        // Filter out challenger's own characters in Challenge status
+        if (row[8] === userId && row[5] === 'Challenge') return false
+
+        return true
+      })
       const availableJumpSize = availablePlayersBetween.length + 1
 
       console.log(`├─ Challenge Analysis:`)
