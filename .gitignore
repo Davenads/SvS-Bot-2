@@ -34,3 +34,6 @@ yarn.lock
 # Build directories
 dist/
 build/
+
+# debug screenshots
+debug-ss/
