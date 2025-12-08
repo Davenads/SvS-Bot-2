@@ -100,13 +100,13 @@ module.exports = {
         return rank > targetRank && rank < challengerRank
       })
 
-      // Filter out vacation players and challenger's own characters in Challenge status
+      // Filter out vacation players and challenger's own characters
       const availablePlayersBetween = playersBetween.filter(row => {
         // Filter out vacation players
         if (row[5] === 'Vacation') return false
 
-        // Filter out challenger's own characters in Challenge status
-        if (row[8] === userId && row[5] === 'Challenge') return false
+        // Filter out challenger's own characters
+        if (row[8] === userId) return false
 
         return true
       })
