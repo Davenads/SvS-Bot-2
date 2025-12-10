@@ -37,3 +37,6 @@ build/
 
 # debug screenshots
 debug-ss/
+
+# Internal documentation
+REDIS_KEY_MIGRATION.md
