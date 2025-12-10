@@ -42,13 +42,19 @@ function initializeChallengeExpiryHandler(client) {
   redisClient.on('challengeWarning', async (challengeKey) => {
     console.log(`[CHALLENGE EXPIRY HANDLER] Received warning event for ${challengeKey}`);
     try {
-      // Extract player ranks from the key to check if warning was already sent
-      const ranksPart = challengeKey.substring(10); // Remove 'challenge:' prefix
-      const [rank1, rank2] = ranksPart.split('-').map(Number);
-      
+      // Get challenge data from Redis to get player info
+      const challengeData = await redisClient.client.get(challengeKey);
+      if (!challengeData) {
+        console.log(`Challenge ${challengeKey} no longer exists in Redis`);
+        return;
+      }
+
+      const parsedData = JSON.parse(challengeData);
+      const { player1, player2 } = parsedData;
+
       // Try to acquire a lock to prevent duplicate warnings
-      const canSendWarning = await redisClient.markChallengeWarningAsSent(rank1, rank2);
-      
+      const canSendWarning = await redisClient.markChallengeWarningAsSent(player1, player2);
+
       if (canSendWarning) {
         await handleChallengeWarning(client, challengeKey);
       } else {
@@ -80,12 +86,6 @@ function initializeChallengeExpiryHandler(client) {
  * @param {string} challengeKey - Redis key for the challenge
  */
 async function handleChallengeWarning(client, challengeKey) {
-  // Extract player ranks from the key
-  const ranksPart = challengeKey.substring(10); // Remove 'challenge:' prefix
-  const [rank1, rank2] = ranksPart.split('-').map(Number);
-  
-  console.log(`[CHALLENGE EXPIRY HANDLER] Processing warning for challenge between ranks ${rank1} and ${rank2}`);
-  
   try {
     // Get challenge data from Redis
     const challengeData = await redisClient.client.get(challengeKey);
@@ -93,9 +93,11 @@ async function handleChallengeWarning(client, challengeKey) {
       console.log(`Challenge ${challengeKey} no longer exists in Redis`);
       return;
     }
-    
+
     const parsedData = JSON.parse(challengeData);
     const { player1, player2 } = parsedData;
+
+    console.log(`[CHALLENGE EXPIRY HANDLER] Processing warning for challenge between ${player1.name} and ${player2.name}`);
     
     // Fetch the challenges channel
     const challengesChannel = await client.channels.fetch(CHALLENGES_CHANNEL_ID);
@@ -119,8 +121,8 @@ async function handleChallengeWarning(client, challengeKey) {
       console.error(`Error updating challenge data after warning: ${updateError.message}`);
       // Non-fatal error, continue
     }
-    
-    console.log(`Warning notification sent for challenge between ranks ${rank1} and ${rank2}`);
+
+    console.log(`Warning notification sent for challenge ${challengeKey}`);
   } catch (error) {
     console.error(`Error handling challenge warning: ${error.message}`);
     logError('Challenge warning handler error', error);
@@ -134,33 +136,41 @@ async function handleChallengeWarning(client, challengeKey) {
  * @param {string} challengeKey - Redis key for the challenge
  */
 async function handleChallengeExpiration(client, challengeKey) {
-  // Extract player ranks from the key
-  const ranksPart = challengeKey.substring(10); // Remove 'challenge:' prefix
-  const [rank1, rank2] = ranksPart.split('-').map(Number);
-  
-  console.log(`[CHALLENGE EXPIRY HANDLER] Processing expiration for challenge between ranks ${rank1} and ${rank2}`);
-  
+  console.log(`[CHALLENGE EXPIRY HANDLER] Processing expiration for challenge ${challengeKey}`);
+
   try {
+    // Parse player info from the key
+    // Format: challenge:discordId1-element1:discordId2-element2
+    const keyPart = challengeKey.substring(10); // Remove 'challenge:' prefix
+    const [player1Key, player2Key] = keyPart.split(':');
+    const [discordId1, element1] = player1Key.split('-');
+    const [discordId2, element2] = player2Key.split('-');
+
+    console.log(`[CHALLENGE EXPIRY HANDLER] Parsed from key: Player1(${discordId1}, ${element1}), Player2(${discordId2}, ${element2})`);
+
     // Fetch current data from Google Sheets
     const sheetData = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${SHEET_NAME}!A2:K`
     });
-    
+
     const rows = sheetData.data.values || [];
     if (!rows.length) {
       console.log('No data found in Google Sheets. Exiting.');
       return;
     }
-    
-    // Find player rows in the sheet
-    const player1Row = rows.find(row => parseInt(row[0]) === rank1);
-    const player2Row = rows.find(row => parseInt(row[0]) === rank2);
-    
+
+    // Find player rows in the sheet by discordId and element
+    const player1Row = rows.find(row => row[8] === discordId1 && row[3] === element1);
+    const player2Row = rows.find(row => row[8] === discordId2 && row[3] === element2);
+
     if (!player1Row || !player2Row) {
-      console.log(`One or both players (ranks ${rank1}, ${rank2}) not found in sheet.`);
+      console.log(`One or both players not found in sheet.`);
       return;
     }
+
+    const rank1 = parseInt(player1Row[0]);
+    const rank2 = parseInt(player2Row[0]);
     
     // Verify both players are still in challenge status with each other
     const player1Status = player1Row[5];
@@ -253,8 +263,8 @@ async function handleChallengeExpiration(client, challengeKey) {
       resource: { requests }
     });
     
-    console.log(`Google Sheet updated for expired challenge between ranks ${rank1} and ${rank2}`);
-    
+    console.log(`Google Sheet updated for expired challenge: ${player1Row[1]} vs ${player2Row[1]}`);
+
     // Fetch the challenges channel
     const challengesChannel = await client.channels.fetch(CHALLENGES_CHANNEL_ID);
     if (!challengesChannel) {
@@ -339,14 +349,10 @@ async function runSafetyCheck(client) {
       // Check if we're within 24 hours of expiry but the warning hasn't been sent
       if (remainingTime <= 24 * 60 * 60 && remainingTime > 23.9 * 60 * 60) {
         console.log(`Safety check: Challenge ${key} should be sending warning soon`);
-        
-        // Extract player ranks from the key to check if warning was already sent
-        const ranksPart = key.substring(10); // Remove 'challenge:' prefix
-        const [rank1, rank2] = ranksPart.split('-').map(Number);
-        
+
         // Try to acquire a lock to prevent duplicate warnings
-        const canSendWarning = await redisClient.markChallengeWarningAsSent(rank1, rank2);
-        
+        const canSendWarning = await redisClient.markChallengeWarningAsSent(challenge.player1, challenge.player2);
+
         if (canSendWarning) {
           // The warning key should have expired, but just in case, trigger the warning
           handleChallengeWarning(client, key).catch(err => {

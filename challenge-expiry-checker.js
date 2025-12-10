@@ -74,15 +74,15 @@ async function checkChallengeExpirations(client) {
     // Process each active challenge
     for (const challenge of activeChallenges) {
       const { player1, player2, remainingTime, warningNotificationSent } = challenge;
-      console.log(`Processing challenge between Rank #${player1.rank} and Rank #${player2.rank} - Remaining time: ${remainingTime}s`);
-      
+      console.log(`Processing challenge between ${player1.name} and ${player2.name} - Remaining time: ${remainingTime}s`);
+
       // Verify both players are still in a challenge according to the sheet
-      const player1Row = rows.find(row => parseInt(row[0]) === parseInt(player1.rank));
-      const player2Row = rows.find(row => parseInt(row[0]) === parseInt(player2.rank));
-      
+      const player1Row = rows.find(row => row[8] === player1.discordId && row[3] === player1.element);
+      const player2Row = rows.find(row => row[8] === player2.discordId && row[3] === player2.element);
+
       if (!player1Row || !player2Row) {
         console.log(`One or both players not found in sheet. Removing challenge from Redis.`);
-        await redisClient.removeChallenge(player1.rank, player2.rank);
+        await redisClient.removeChallenge(player1, player2);
         continue;
       }
       
@@ -91,15 +91,17 @@ async function checkChallengeExpirations(client) {
       const player2Status = player2Row[5];
       const player1Opponent = player1Row[7];
       const player2Opponent = player2Row[7];
-      
+      const player1Rank = player1Row[0];
+      const player2Rank = player2Row[0];
+
       if (
-        player1Status !== 'Challenge' || 
-        player2Status !== 'Challenge' || 
-        player1Opponent !== player2.rank.toString() || 
-        player2Opponent !== player1.rank.toString()
+        player1Status !== 'Challenge' ||
+        player2Status !== 'Challenge' ||
+        player1Opponent !== player2Rank.toString() ||
+        player2Opponent !== player1Rank.toString()
       ) {
         console.log(`Challenge state mismatch between Redis and Google Sheets. Removing from Redis tracking.`);
-        await redisClient.removeChallenge(player1.rank, player2.rank);
+        await redisClient.removeChallenge(player1, player2);
         continue;
       }
       
@@ -109,31 +111,31 @@ async function checkChallengeExpirations(client) {
       const ONE_DAY_IN_SECONDS = 24 * 60 * 60;
       
       if (remainingTime <= ONE_DAY_IN_SECONDS && !warningNotificationSent) {
-        console.log(`Challenge between Rank #${player1.rank} and Rank #${player2.rank} will expire in less than 24 hours`);
-        
+        console.log(`Challenge between ${player1.name} and ${player2.name} will expire in less than 24 hours`);
+
         // Try to acquire a lock to prevent duplicate warnings
-        const canSendWarning = await redisClient.markChallengeWarningAsSent(player1.rank, player2.rank);
-        
+        const canSendWarning = await redisClient.markChallengeWarningAsSent(player1, player2);
+
         if (canSendWarning) {
           // Send warning message
           await challengesChannel.send(`⚠️ **CHALLENGE EXPIRING SOON** ⚠️\n\n<@${player1.discordId}> and <@${player2.discordId}>, your challenge will automatically expire in less than 24 hours! Please complete your match or ask an SvS Manager to extend the challenge.`);
           console.log('Warning notification sent and marked in Redis');
         } else {
-          console.log(`Warning already sent for challenge between Rank #${player1.rank} and Rank #${player2.rank}, skipping duplicate`);
+          console.log(`Warning already sent for challenge between ${player1.name} and ${player2.name}, skipping duplicate`);
         }
       }
       
       // Check if challenge has expired
       if (remainingTime <= 0) {
-        console.log(`Challenge between Rank #${player1.rank} and Rank #${player2.rank} has expired. Processing auto-nullification...`);
-        
+        console.log(`Challenge between ${player1.name} and ${player2.name} has expired. Processing auto-nullification...`);
+
         // Build requests to update Google Sheet
         const requests = [];
         const processedChallenges = [];
-        
+
         // Find row indices
-        const player1RowIndex = rows.findIndex(row => parseInt(row[0]) === parseInt(player1.rank));
-        const player2RowIndex = rows.findIndex(row => parseInt(row[0]) === parseInt(player2.rank));
+        const player1RowIndex = rows.findIndex(row => row[8] === player1.discordId && row[3] === player1.element);
+        const player2RowIndex = rows.findIndex(row => row[8] === player2.discordId && row[3] === player2.element);
         
         if (player1RowIndex !== -1 && player2RowIndex !== -1) {
           // Update player1's row
@@ -182,14 +184,14 @@ async function checkChallengeExpirations(client) {
           processedChallenges.push({
             player1: {
               name: player1Row[1],
-              rank: player1.rank,
+              rank: player1Row[0],
               discordId: player1.discordId,
               element: player1.element,
               spec: player1Row[2]
             },
             player2: {
               name: player2Row[1],
-              rank: player2.rank,
+              rank: player2Row[0],
               discordId: player2.discordId,
               element: player2.element,
               spec: player2Row[2]
@@ -203,8 +205,8 @@ async function checkChallengeExpirations(client) {
             resource: { requests }
           });
           
-          console.log(`Google Sheet updated for expired challenge between Rank #${player1.rank} and Rank #${player2.rank}`);
-          
+          console.log(`Google Sheet updated for expired challenge: ${player1.name} vs ${player2.name}`);
+
           // Create and send embed for nullified challenge
           const embed = new EmbedBuilder()
             .setTitle('⏰ Challenge Expired - Auto-Nullified ⏰')
@@ -213,7 +215,7 @@ async function checkChallengeExpirations(client) {
             .addFields(
               {
                 name: 'Player 1',
-                value: `Rank #${player1.rank} (<@${player1.discordId}>)
+                value: `Rank #${player1Row[0]} (<@${player1.discordId}>)
 ${specEmojiMap[player1Row[2]] || ''} ${elementEmojiMap[player1.element] || ''}`,
                 inline: true
               },
@@ -224,7 +226,7 @@ ${specEmojiMap[player1Row[2]] || ''} ${elementEmojiMap[player1.element] || ''}`,
               },
               {
                 name: 'Player 2',
-                value: `Rank #${player2.rank} (<@${player2.discordId}>)
+                value: `Rank #${player2Row[0]} (<@${player2.discordId}>)
 ${specEmojiMap[player2Row[2]] || ''} ${elementEmojiMap[player2.element] || ''}`,
                 inline: true
               },
@@ -237,16 +239,16 @@ ${specEmojiMap[player2Row[2]] || ''} ${elementEmojiMap[player2.element] || ''}`,
               text: 'Both players are now available for new challenges',
             })
             .setTimestamp();
-            
+
           await challengesChannel.send({ embeds: [embed] });
           console.log('Auto-nullification embed sent to challenges channel');
-          
+
           // Remove from Redis tracking
-          await redisClient.removeChallenge(player1.rank, player2.rank);
+          await redisClient.removeChallenge(player1, player2);
           console.log('Challenge removed from Redis tracking');
         } else {
           console.log(`Could not find one or both players in sheet. Removing from Redis.`);
-          await redisClient.removeChallenge(player1.rank, player2.rank);
+          await redisClient.removeChallenge(player1, player2);
         }
       }
     }

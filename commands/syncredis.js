@@ -39,8 +39,8 @@ module.exports = {
                 .setRequired(false)
         )
         .addBooleanOption(option =>
-            option.setName('fix_broken_keys')
-                .setDescription('Fix Redis challenge keys that have outdated rank numbers after manual rank shifts')
+            option.setName('migrate_old_keys')
+                .setDescription('Migrate old rank-based keys to new discordId+element format')
                 .setRequired(false)
         )
         .addBooleanOption(option =>
@@ -68,10 +68,10 @@ module.exports = {
         const dryRun = interaction.options.getBoolean('dry_run') || false;
         const showCooldowns = interaction.options.getBoolean('show_cooldowns') || false;
         const clearCooldowns = interaction.options.getBoolean('clear_cooldowns') || false;
-        const fixBrokenKeys = interaction.options.getBoolean('fix_broken_keys') || false;
+        const migrateOldKeys = interaction.options.getBoolean('migrate_old_keys') || false;
         const recalculateTTL = interaction.options.getBoolean('recalculate_ttl') || false;
 
-        console.log(`├─ Options: force=${force}, dry_run=${dryRun}, show_cooldowns=${showCooldowns}, clear_cooldowns=${clearCooldowns}, fix_broken_keys=${fixBrokenKeys}, recalculate_ttl=${recalculateTTL}`);
+        console.log(`├─ Options: force=${force}, dry_run=${dryRun}, show_cooldowns=${showCooldowns}, clear_cooldowns=${clearCooldowns}, migrate_old_keys=${migrateOldKeys}, recalculate_ttl=${recalculateTTL}`);
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -99,20 +99,20 @@ module.exports = {
             const rows = result.data.values || [];
             console.log(`├─ Found ${rows.length} total rows in spreadsheet`);
 
-            // Handle broken key fixing if requested
-            let brokenKeyResults = [];
-            if (fixBrokenKeys) {
-                console.log('├─ Processing broken key fixes...');
-                await interaction.editReply({ content: '🔄 Analyzing Redis keys for rank mismatches...' });
+            // Handle old key migration if requested
+            let migrationResults = [];
+            if (migrateOldKeys) {
+                console.log('├─ Processing old key migration...');
+                await interaction.editReply({ content: '🔄 Migrating old rank-based keys to new format...' });
 
-                brokenKeyResults = await this.fixBrokenChallengeKeys(rows, dryRun, recalculateTTL);
-                console.log(`├─ Broken key analysis complete: ${brokenKeyResults.length} issues found`);
+                migrationResults = await this.migrateOldFormatKeys(dryRun);
+                console.log(`├─ Migration complete: ${migrationResults.length} keys processed`);
             }
 
             // Handle TTL recalculation if requested (can be standalone or combined)
             let ttlResults = [];
-            if (recalculateTTL && !fixBrokenKeys) {
-                // Standalone TTL recalculation (not combined with broken key fixes)
+            if (recalculateTTL && !migrateOldKeys) {
+                // Standalone TTL recalculation (not combined with migration)
                 console.log('├─ Processing standalone TTL recalculation...');
                 await interaction.editReply({ content: '🔄 Recalculating challenge expiration times...' });
 
@@ -252,7 +252,7 @@ module.exports = {
 
             for (const pair of challengePairs) {
                 // Check if challenge already exists in Redis
-                const existingChallenge = await redisClient.checkChallenge(pair.player1.rank, pair.player2.rank);
+                const existingChallenge = await redisClient.checkChallenge(pair.player1, pair.player2);
 
                 if (existingChallenge.active && !force) {
                     console.log(`├─ SKIP: Challenge ${pair.player1.rank} vs ${pair.player2.rank} already exists in Redis`);
@@ -386,41 +386,41 @@ module.exports = {
 
             console.log(`└─ Sync command completed: ${syncedCount} synced, ${existingCount} existed, ${skippedCount} errors`);
 
-            // Add broken key results to embed if applicable
-            if (fixBrokenKeys && brokenKeyResults.length > 0) {
-                // Filter to only show keys that need fixing or have errors (exclude 'no_fix_needed')
-                const brokenKeysOnly = brokenKeyResults.filter(r => r.status !== 'no_fix_needed');
+            // Add migration results to embed if applicable
+            if (migrateOldKeys && migrationResults.length > 0) {
+                const migratedKeys = migrationResults.filter(r => r.status === 'migrated' || r.status === 'would_migrate');
 
-                if (brokenKeysOnly.length > 0) {
-                    const brokenKeyText = brokenKeysOnly
+                if (migratedKeys.length > 0) {
+                    const migrationText = migratedKeys
                         .slice(0, 8) // Limit to avoid embed length issues
                         .map(r => {
                             const statusEmoji = {
-                                'fixed': '🔧',
-                                'would_fix': '🔍',
-                                'error': '❌'
+                                'migrated': '✅',
+                                'would_migrate': '🔍',
+                                'error': '❌',
+                                'skipped': '⏭️'
                             }[r.status] || '❓';
                             return `${statusEmoji} ${r.oldKey} → ${r.newKey || 'N/A'}`;
                         })
                         .join('\n');
 
                     embed.addFields({
-                        name: `🔧 Broken Key ${dryRun ? 'Analysis' : 'Fixes'} (${brokenKeysOnly.length})`,
-                        value: brokenKeyText + (brokenKeysOnly.length > 8 ? `\n... and ${brokenKeysOnly.length - 8} more` : ''),
+                        name: `🔄 Key ${dryRun ? 'Migration Preview' : 'Migration'} (${migratedKeys.length})`,
+                        value: migrationText + (migratedKeys.length > 8 ? `\n... and ${migratedKeys.length - 8} more` : ''),
                         inline: false
                     });
-                } else {
-                    // All keys are correct - show success message
+                } else if (migrationResults.every(r => r.status === 'already_new_format')) {
+                    // All keys are already in new format
                     embed.addFields({
-                        name: `✅ Key Validation Complete`,
-                        value: `All ${brokenKeyResults.length} challenge keys have correct rank numbers. No fixes needed.`,
+                        name: `✅ Migration Check Complete`,
+                        value: `All ${migrationResults.length} challenge keys are already in new format. No migration needed.`,
                         inline: false
                     });
                 }
             }
 
             // Add TTL recalculation results if applicable
-            if (recalculateTTL && !fixBrokenKeys && ttlResults.length > 0) {
+            if (recalculateTTL && !migrateOldKeys && ttlResults.length > 0) {
                 const ttlUpdates = ttlResults.filter(r => r.status === 'updated' || r.status === 'would_update');
 
                 if (ttlUpdates.length > 0) {
@@ -463,221 +463,143 @@ module.exports = {
         }
     },
 
-    // Helper method to fix broken challenge keys after rank shifts
-    async fixBrokenChallengeKeys(sheetRows, dryRun = false, recalculateTTL = false) {
+    // Helper method to migrate old rank-based keys to new discordId+element format
+    async migrateOldFormatKeys(dryRun = false) {
         const results = [];
-        
+
         try {
-            // Get all existing challenge keys from Redis
-            const allChallenges = await redisClient.getAllChallenges();
-            console.log(`├─ Found ${allChallenges.length} existing challenge keys in Redis`);
-            
-            // Create lookup maps for character identification
-            // Since users can have up to 3 characters, we need to match by character name + Discord ID
-            const characterNameToRank = {}; // "CharacterName" -> rank
-            const discordIdAndNameToRank = {}; // "discordId:CharacterName" -> rank
-            const rankToPlayerData = {};
-            
-            sheetRows.forEach(row => {
-                if (row[0] && row[1] && row[8]) { // rank, name, and discordId
-                    const rank = row[0];
-                    const characterName = row[1];
-                    const discordId = row[8];
-                    
-                    // Map character name to rank (primary lookup)
-                    characterNameToRank[characterName] = rank;
-                    
-                    // Map discordId:characterName combination to rank (backup lookup)
-                    discordIdAndNameToRank[`${discordId}:${characterName}`] = rank;
-                    
-                    rankToPlayerData[rank] = {
-                        rank: rank,
-                        name: characterName,
-                        spec: row[2],
-                        element: row[3],
-                        discUser: row[4],
-                        status: row[5],
-                        challengeDate: row[6],
-                        opponentRank: row[7],
-                        discordId: discordId
-                    };
-                }
-            });
-            
-            // Analyze each challenge key
-            for (const challenge of allChallenges) {
-                const player1 = challenge.player1;
-                const player2 = challenge.player2;
-                
-                // Find current ranks using character name (primary) or discordId:name (backup)
-                let currentRank1 = characterNameToRank[player1.name];
-                let currentRank2 = characterNameToRank[player2.name];
-                
-                // Backup lookup if character name alone doesn't work (handle name changes)
-                if (!currentRank1) {
-                    currentRank1 = discordIdAndNameToRank[`${player1.discordId}:${player1.name}`];
-                }
-                if (!currentRank2) {
-                    currentRank2 = discordIdAndNameToRank[`${player2.discordId}:${player2.name}`];
-                }
-                
-                // Check if ranks have changed (normalize to integers for comparison)
-                const rank1Changed = currentRank1 && parseInt(currentRank1) !== parseInt(player1.rank);
-                const rank2Changed = currentRank2 && parseInt(currentRank2) !== parseInt(player2.rank);
-                
-                // Handle missing characters
-                if (!currentRank1 || !currentRank2) {
-                    console.log(`├─ CHARACTER NOT FOUND: ${challenge.key}`);
-                    console.log(`├─   Player 1: ${player1.name} (${player1.discordId}) - found rank: ${currentRank1 || 'NOT FOUND'}`);
-                    console.log(`├─   Player 2: ${player2.name} (${player2.discordId}) - found rank: ${currentRank2 || 'NOT FOUND'}`);
-                    
-                    results.push({
-                        status: 'error',
-                        oldKey: challenge.key,
-                        newKey: null,
-                        reason: 'Character(s) no longer on ladder',
-                        player1: player1.name,
-                        player2: player2.name
-                    });
-                    continue;
-                }
-                
-                if (rank1Changed || rank2Changed) {
-                    console.log(`├─ BROKEN KEY DETECTED: ${challenge.key}`);
-                    console.log(`├─   Player 1: ${player1.name} stored rank ${player1.rank} → current rank ${currentRank1}`);
-                    console.log(`├─   Player 2: ${player2.name} stored rank ${player2.rank} → current rank ${currentRank2}`);
-                    
-                    // Generate new key with current ranks
-                    const newKey = redisClient.generateChallengeKey(currentRank1, currentRank2);
-                    
+            // Get all challenge keys from Redis
+            const allKeys = await redisClient.client.keys('challenge:*');
+            console.log(`├─ Found ${allKeys.length} challenge keys in Redis`);
+
+            for (const key of allKeys) {
+                const keyPart = key.substring(10); // Remove 'challenge:' prefix
+
+                // Detect old format: no ':' in keyPart means it's rank-based (e.g., "5-8")
+                if (!keyPart.includes(':')) {
+                    // Old format detected
+                    console.log(`├─ OLD FORMAT KEY: ${key}`);
+
+                    const data = await redisClient.client.get(key);
+                    if (!data) {
+                        console.log(`├─   Key expired during migration, skipping`);
+                        results.push({
+                            status: 'skipped',
+                            oldKey: key,
+                            newKey: null,
+                            reason: 'Key expired during migration'
+                        });
+                        continue;
+                    }
+
+                    const challengeData = JSON.parse(data);
+                    const { player1, player2 } = challengeData;
+
+                    // Get current TTL
+                    const ttl = await redisClient.client.ttl(key);
+                    if (ttl <= 0) {
+                        console.log(`├─   Key has no TTL, skipping`);
+                        results.push({
+                            status: 'skipped',
+                            oldKey: key,
+                            newKey: null,
+                            reason: 'Key has no TTL'
+                        });
+                        continue;
+                    }
+
+                    // Generate new key using discordId + element
+                    const newKey = redisClient.generateChallengeKey(player1, player2);
+
+                    console.log(`├─   Old: ${key}`);
+                    console.log(`├─   New: ${newKey}`);
+                    console.log(`├─   TTL: ${ttl}s (${Math.floor(ttl / 3600)}h ${Math.floor((ttl % 3600) / 60)}m)`);
+
                     if (dryRun) {
                         results.push({
-                            status: 'would_fix',
-                            oldKey: challenge.key,
+                            status: 'would_migrate',
+                            oldKey: key,
                             newKey: newKey,
-                            reason: 'Rank mismatch detected',
-                            player1: `${player1.name} (${player1.rank}→${currentRank1})`,
-                            player2: `${player2.name} (${player2.rank}→${currentRank2})`
+                            ttl: ttl,
+                            player1: player1.name,
+                            player2: player2.name
                         });
                     } else {
-                        // Fix the broken key
+                        // Perform migration
                         try {
-                            // Get current TTL and challenge data
-                            const challengeData = challenge;
-                            const currentTTL = challenge.remainingTime;
+                            // Create new key with same data and TTL
+                            await redisClient.client.setex(newKey, ttl, data);
 
-                            // Determine TTL to use (recalculate or preserve)
-                            let newTTL;
-                            let ttlSource;
+                            // Delete old key
+                            await redisClient.client.del(key);
 
-                            if (recalculateTTL) {
-                                // Get the cDate for this challenge
-                                const player1Data = rankToPlayerData[currentRank1];
-                                const player2Data = rankToPlayerData[currentRank2];
+                            // Handle warning keys
+                            const oldWarningKey = `challenge-warning:${keyPart}`;
+                            const newWarningKey = `challenge-warning:${newKey.substring(10)}`;
 
-                                // Both players should have the same challengeDate, use player1's
-                                const challengeDate = player1Data?.challengeDate || player2Data?.challengeDate;
+                            // Calculate warning TTL (24 hours before main expiry)
+                            const warningTTL = Math.max(60, ttl - (24 * 60 * 60));
 
-                                if (challengeDate) {
-                                    newTTL = redisClient.calculateTTLFromChallengeDate(challengeDate);
-                                    ttlSource = `calculated from cDate: ${challengeDate}`;
-                                } else {
-                                    // Fallback: preserve existing TTL if no cDate available
-                                    newTTL = currentTTL;
-                                    ttlSource = 'preserved (no cDate found)';
-                                    console.log(`├─   WARNING: No cDate found for challenge, preserving TTL`);
-                                }
-                            } else {
-                                // Original behavior: preserve existing TTL
-                                newTTL = currentTTL;
-                                ttlSource = 'preserved';
+                            // Only create warning key if there's enough time
+                            if (warningTTL > 60) {
+                                await redisClient.client.setex(newWarningKey, warningTTL, newKey);
                             }
 
-                            // Log TTL changes if significant
-                            const ttlDiffSeconds = Math.abs(newTTL - currentTTL);
-                            const ttlDiffHours = ttlDiffSeconds / 3600;
-                            if (ttlDiffHours > 1) {
-                                console.log(`├─   TTL change: ${currentTTL}s → ${newTTL}s (${ttlSource})`);
-                            }
-
-                            // Update player ranks in the data
-                            const updatedData = {
-                                ...challengeData,
-                                player1: {
-                                    ...challengeData.player1,
-                                    rank: currentRank1
-                                },
-                                player2: {
-                                    ...challengeData.player2,
-                                    rank: currentRank2
-                                }
-                            };
-
-                            // Remove old key and warning key
-                            await redisClient.client.del(challenge.key);
-                            const oldWarningKey = `challenge-warning:${challenge.key.substring(10)}`;
+                            // Delete old warning key
                             await redisClient.client.del(oldWarningKey);
 
-                            // Create new key with corrected ranks and potentially recalculated TTL
-                            const challengeDataStr = JSON.stringify(updatedData);
-                            await redisClient.client.setex(newKey, Math.max(300, newTTL), challengeDataStr);
+                            // Clean up any old warning lock
+                            const oldWarningLock = `warning-lock:${keyPart}`;
+                            await redisClient.client.del(oldWarningLock);
 
-                            // Create new warning key with recalculated TTL
-                            const warningTTL = Math.max(60, newTTL - (24 * 60 * 60));
-                            const newWarningKey = `challenge-warning:${newKey.substring(10)}`;
-                            await redisClient.client.setex(newWarningKey, warningTTL, newKey);
-                            
-                            console.log(`├─ FIXED: ${challenge.key} → ${newKey}`);
-                            
+                            console.log(`├─ ✅ MIGRATED: ${key} → ${newKey}`);
+
                             results.push({
-                                status: 'fixed',
-                                oldKey: challenge.key,
+                                status: 'migrated',
+                                oldKey: key,
                                 newKey: newKey,
-                                reason: 'Successfully updated ranks',
-                                player1: `${player1.name} (${player1.rank}→${currentRank1})`,
-                                player2: `${player2.name} (${player2.rank}→${currentRank2})`
+                                ttl: ttl,
+                                player1: player1.name,
+                                player2: player2.name
                             });
-                            
-                        } catch (fixError) {
-                            console.error(`├─ ERROR fixing ${challenge.key}:`, fixError);
+
+                        } catch (migrationError) {
+                            console.error(`├─ ❌ ERROR migrating ${key}:`, migrationError);
                             results.push({
                                 status: 'error',
-                                oldKey: challenge.key,
+                                oldKey: key,
                                 newKey: newKey,
-                                reason: `Fix failed: ${fixError.message}`,
+                                reason: `Migration failed: ${migrationError.message}`,
                                 player1: player1.name,
                                 player2: player2.name
                             });
                         }
                     }
                 } else {
-                    // Key is correct, no changes needed
+                    // New format - already migrated
                     results.push({
-                        status: 'no_fix_needed',
-                        oldKey: challenge.key,
+                        status: 'already_new_format',
+                        oldKey: key,
                         newKey: null,
-                        reason: 'Ranks match current ladder',
-                        player1: player1.name,
-                        player2: player2.name
+                        reason: 'Already in new format'
                     });
                 }
             }
-            
-            const issuesFound = results.filter(r => r.status !== 'no_fix_needed').length;
-            console.log(`├─ Broken key analysis complete: ${issuesFound} issues found, ${results.length} total keys checked`);
-            
+
+            const migratedCount = results.filter(r => r.status === 'migrated' || r.status === 'would_migrate').length;
+            const alreadyNewCount = results.filter(r => r.status === 'already_new_format').length;
+            console.log(`├─ Migration complete: ${migratedCount} migrated, ${alreadyNewCount} already new format`);
+
             return results;
-            
+
         } catch (error) {
-            console.error('├─ Error in fixBrokenChallengeKeys:', error);
-            logError('Error fixing broken challenge keys', error);
+            console.error('├─ Error in migrateOldFormatKeys:', error);
+            logError('Error migrating old format keys', error);
             return [{
                 status: 'error',
                 oldKey: 'N/A',
                 newKey: null,
-                reason: `Analysis failed: ${error.message}`,
-                player1: 'N/A',
-                player2: 'N/A'
+                reason: `Migration failed: ${error.message}`
             }];
         }
     },

@@ -290,7 +290,15 @@ module.exports = {
 
       // Remove challenge from Redis (if it exists)
       try {
-        await redisClient.removeChallenge(winnerRank, loserRank);
+        const winnerPlayer = {
+          discordId: winnerRow[8],
+          element: winnerRow[3]
+        };
+        const loserPlayer = {
+          discordId: loserRow[8],
+          element: loserRow[3]
+        };
+        await redisClient.removeChallenge(winnerPlayer, loserPlayer);
         console.log('├─ Removed challenge from Redis tracking');
       } catch (error) {
         console.error('Error removing challenge from Redis:', error);

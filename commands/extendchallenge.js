@@ -143,9 +143,15 @@ module.exports = {
       
       // Update the challenge in Redis to reset the expiration
       console.log('Updating challenge in Redis...');
-      const player1Rank = playerRow[0];
-      const player2Rank = opponentRow[0];
-      await redisClient.updateChallenge(player1Rank, player2Rank, formattedDate);
+      const player1 = {
+        discordId: playerRow[8],
+        element: playerRow[3]
+      };
+      const player2 = {
+        discordId: opponentRow[8],
+        element: opponentRow[3]
+      };
+      await redisClient.updateChallenge(player1, player2, formattedDate);
       console.log('Redis challenge updated successfully');
 
       // Prepare an embed message to confirm the extension

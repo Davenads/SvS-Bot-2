@@ -102,10 +102,13 @@ class RedisClient extends EventEmitter {
         return `cooldown:${pair[0]}:${pair[1]}`;
     }
 
-    // Key format: `challenge:${player1Rank}-${player2Rank}`
-    generateChallengeKey(player1Rank, player2Rank) {
-        const pair = [String(player1Rank), String(player2Rank)].sort();
-        return `challenge:${pair[0]}-${pair[1]}`;
+    // Key format: `challenge:${discordId1}-${element1}:${discordId2}-${element2}`
+    generateChallengeKey(player1, player2) {
+        const pair = [
+            `${player1.discordId}-${player1.element}`,
+            `${player2.discordId}-${player2.element}`
+        ].sort(); // Sort to ensure consistent key regardless of order
+        return `challenge:${pair[0]}:${pair[1]}`;
     }
 
     async setCooldown(player1, player2) {
@@ -172,7 +175,7 @@ class RedisClient extends EventEmitter {
     }
 
     async setChallenge(player1, player2, challengeDate) {
-        const key = this.generateChallengeKey(player1.rank, player2.rank);
+        const key = this.generateChallengeKey(player1, player2);
         
         let expiryTime;
         if (challengeDate) {
@@ -221,8 +224,8 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async updateChallenge(player1Rank, player2Rank, newChallengeDate) {
-        const key = this.generateChallengeKey(player1Rank, player2Rank);
+    async updateChallenge(player1, player2, newChallengeDate) {
+        const key = this.generateChallengeKey(player1, player2);
         // Reset to 3 days from now
         const expiryTime = 3 * 24 * 60 * 60;
         // 24 hours before expiration (for warning) - 2 days
@@ -264,8 +267,8 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async checkChallenge(player1Rank, player2Rank) {
-        const key = this.generateChallengeKey(player1Rank, player2Rank);
+    async checkChallenge(player1, player2) {
+        const key = this.generateChallengeKey(player1, player2);
         
         try {
             const challengeData = await this.client.get(key);
@@ -326,8 +329,8 @@ class RedisClient extends EventEmitter {
     }
 
     // Create or check a warning lock to prevent duplicate notifications
-    async markChallengeWarningAsSent(player1Rank, player2Rank) {
-        const key = this.generateChallengeKey(player1Rank, player2Rank);
+    async markChallengeWarningAsSent(player1, player2) {
+        const key = this.generateChallengeKey(player1, player2);
         const warningLockKey = `warning-lock:${key.substring(10)}`;
         
         try {
@@ -351,8 +354,8 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async removeChallenge(player1Rank, player2Rank) {
-        const key = this.generateChallengeKey(player1Rank, player2Rank);
+    async removeChallenge(player1, player2) {
+        const key = this.generateChallengeKey(player1, player2);
         const warningKey = `challenge-warning:${key.substring(10)}`;
         
         try {
