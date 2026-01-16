@@ -1,7 +1,20 @@
 // redis-client.js
 const Redis = require('ioredis');
+const moment = require('moment-timezone');
 const { logError } = require('./logger');
 const { EventEmitter } = require('events');
+
+// Map timezone abbreviations to IANA timezone names
+const timezoneMap = {
+    'EST': 'America/New_York',
+    'EDT': 'America/New_York',
+    'CST': 'America/Chicago',
+    'CDT': 'America/Chicago',
+    'MST': 'America/Denver',
+    'MDT': 'America/Denver',
+    'PST': 'America/Los_Angeles',
+    'PDT': 'America/Los_Angeles'
+};
 
 class RedisClient extends EventEmitter {
     // Helper method to determine Redis configuration based on environment
@@ -151,27 +164,35 @@ class RedisClient extends EventEmitter {
             // Parse the challenge date string
             // Format examples: "6/25, 12:40 AM EDT", "12/1, 3:15 PM EST"
             const currentYear = new Date().getFullYear();
-            
-            // Remove timezone and parse
+
+            // Extract the timezone abbreviation from the end of the string
+            const tzMatch = challengeDateStr.match(/ (EDT|EST|PST|PDT|CST|CDT|MST|MDT)$/);
+            const tzAbbrev = tzMatch ? tzMatch[1] : 'EST';
+            const ianaTimezone = timezoneMap[tzAbbrev] || 'America/New_York';
+
+            // Remove timezone abbreviation for parsing
             const dateStr = challengeDateStr.replace(/ (EDT|EST|PST|PDT|CST|CDT|MST|MDT)$/, '');
-            const challengeDate = new Date(`${dateStr}, ${currentYear}`);
-            
+
+            // Parse the date in the correct timezone using moment-timezone
+            // Format: "M/D, h:mm A" -> "1/12, 11:29 AM"
+            const challengeDate = moment.tz(`${dateStr}, ${currentYear}`, 'M/D, h:mm A, YYYY', ianaTimezone);
+
             // If the parsed date is invalid, fall back to current time
-            if (isNaN(challengeDate.getTime())) {
+            if (!challengeDate.isValid()) {
                 console.log(`Warning: Could not parse challenge date "${challengeDateStr}", using current time`);
                 return 3 * 24 * 60 * 60; // 3 days from now
             }
-            
+
             // Calculate expiration: challenge date + 3 days
-            const expirationDate = new Date(challengeDate.getTime() + (3 * 24 * 60 * 60 * 1000));
-            
+            const expirationDate = challengeDate.clone().add(3, 'days');
+
             // Calculate TTL: seconds from now until expiration
-            const ttlMs = expirationDate.getTime() - Date.now();
+            const ttlMs = expirationDate.valueOf() - Date.now();
             const ttlSeconds = Math.max(300, Math.floor(ttlMs / 1000)); // Minimum 5 minutes
-            
-            console.log(`Challenge date: ${challengeDate.toISOString()}, expires: ${expirationDate.toISOString()}, TTL: ${ttlSeconds}s`);
+
+            console.log(`Challenge date: ${challengeDate.format()} (${ianaTimezone}), expires: ${expirationDate.format()}, TTL: ${ttlSeconds}s`);
             return ttlSeconds;
-            
+
         } catch (error) {
             console.error(`Error parsing challenge date "${challengeDateStr}":`, error);
             return 3 * 24 * 60 * 60; // Fallback to 3 days
