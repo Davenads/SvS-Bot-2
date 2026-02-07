@@ -12,6 +12,7 @@ const sheets = google.sheets({
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
 const MAIN_SHEET = 'SvS Ladder'
+const VACATION_SHEET = 'Extended Vacation'
 const sheetId = 0 // SvS Ladder tab
 
 // Emoji mappings
@@ -39,17 +40,17 @@ const farewellMessages = [
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('remove')
-    .setDescription('Permanently remove a player from the ladder')
+    .setName('bench')
+    .setDescription('Move a player from the ladder to Extended Vacation')
     .addIntegerOption(option =>
       option
         .setName('rank')
-        .setDescription('The rank number of the player to remove')
+        .setDescription('The rank number of the player to bench')
         .setRequired(true)
     ),
 
   async execute (interaction) {
-    console.log(`\n[${new Date().toISOString()}] Remove Command`)
+    console.log(`\n[${new Date().toISOString()}] Bench Command`)
     console.log(`├─ Invoked by: ${interaction.user.tag}`)
 
     await interaction.deferReply({ ephemeral: true })
@@ -69,11 +70,17 @@ module.exports = {
     try {
       const rankToRemove = interaction.options.getInteger('rank')
 
-      // Fetch data from main sheet
-      const mainResult = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${MAIN_SHEET}!A2:K`
-      })
+      // First, fetch data from both sheets
+      const [mainResult, vacationResult] = await Promise.all([
+        sheets.spreadsheets.values.get({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `${MAIN_SHEET}!A2:K`
+        }),
+        sheets.spreadsheets.values.get({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `${VACATION_SHEET}!A2:K`
+        })
+      ])
 
       const rows = mainResult.data.values
       if (!rows || !rows.length) {
@@ -104,14 +111,36 @@ module.exports = {
       const discordUsername = playerData[4]
       const discordId = playerData[8]
 
-      console.log('├─ Removing Player:')
+      console.log('├─ Benching Player:')
       console.log(`│  ├─ Rank: #${rankToRemove}`)
       console.log(`│  └─ Discord: ${discordUsername}`)
+
+      // Find first empty row in Extended Vacation tab
+      const vacationRows = vacationResult.data.values || []
+      let emptyRowIndex = vacationRows.length + 2
+      for (let i = 0; i < vacationRows.length; i++) {
+        if (!vacationRows[i] || !vacationRows[i][1]) {
+          emptyRowIndex = i + 2
+          break
+        }
+      }
+
+      console.log(`├─ Moving to Extended Vacation row ${emptyRowIndex}`)
 
       // Create batch update requests
       const requests = []
 
-      // Handle active challenges affected by removal
+      // 1. Add row to Extended Vacation tab
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${VACATION_SHEET}!A${emptyRowIndex}:K${emptyRowIndex}`,
+        valueInputOption: 'USER_ENTERED',
+        resource: {
+          values: [playerData]
+        }
+      })
+
+      // 2. Handle active challenges affected by removal
       // First, check for any challenge pairs that span across the removed rank
       for (let i = 0; i < rows.length; i++) {
         const currentRow = rows[i]
@@ -160,7 +189,7 @@ module.exports = {
         }
       }
 
-      // Handle direct challenges with the removed player
+      // 3. Handle direct challenges with the removed player
       if (playerData[5] === 'Challenge' && playerData[7]) {
         const opponentRank = parseInt(playerData[7])
         const opponentIndex = rows.findIndex(
@@ -207,7 +236,7 @@ module.exports = {
         }
       }
 
-      // Delete the row from main ladder
+      // 4. Delete the row from main ladder
       requests.push({
         deleteDimension: {
           range: {
@@ -219,7 +248,7 @@ module.exports = {
         }
       })
 
-      // Update remaining ranks and opponent references
+      // 5. Update remaining ranks and opponent references
       let ranksUpdated = 0
       for (let i = rowIndex + 1; i < rows.length; i++) {
         const currentRow = rows[i]
@@ -378,7 +407,7 @@ module.exports = {
           }
         )
         .setFooter({
-          text: `Player removed from the ladder. ${
+          text: `Player moved to Extended Vacation. ${
             ranksAreCorrect
               ? 'All ladder ranks updated successfully!'
               : 'Rank verification needed.'
@@ -392,15 +421,15 @@ module.exports = {
 
       // Send confirmation to command issuer
       await interaction.editReply({
-        content: `Successfully removed ${playerName} from the ladder and updated all affected rankings and challenges.`,
+        content: `Successfully moved ${playerName} to Extended Vacation and updated all affected rankings and challenges.`,
         ephemeral: true
       })
     } catch (error) {
       console.error(`└─ Error: ${error.message}`)
-      logError(`Error removing player: ${error.message}\nStack: ${error.stack}`)
+      logError(`Error benching player: ${error.message}\nStack: ${error.stack}`)
       return interaction.editReply({
         content:
-          'An error occurred while removing the player. Please try again later.',
+          'An error occurred while benching the player. Please try again later.',
         ephemeral: true
       })
     }
