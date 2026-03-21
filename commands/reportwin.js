@@ -315,7 +315,11 @@ module.exports = {
           ]
 
       // Add this new code block for title defends before the embed creation
-      if (winnerRank === 1) {
+      const titleDefendModeEnabled = await redisClient.getTitleDefendMode();
+      if (winnerRank === 1 && !titleDefendModeEnabled) {
+        console.log('├─ Title defend tracking disabled — skipping Metrics update');
+      }
+      if (winnerRank === 1 && titleDefendModeEnabled) {
         console.log('Processing title defense metrics...')
 
         try {

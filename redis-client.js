@@ -496,6 +496,30 @@ class RedisClient extends EventEmitter {
             return [];
         }
     }
+
+    // Title defend mode toggle
+    // Key: svs:titledefends:enabled — value: 'true' | 'false' (no TTL, persistent)
+    async getTitleDefendMode() {
+        try {
+            const value = await this.client.get('svs:titledefends:enabled');
+            // Default to enabled if key hasn't been set yet
+            return value === null ? true : value === 'true';
+        } catch (error) {
+            console.error('Error getting title defend mode:', error);
+            logError('Error getting title defend mode', error);
+            return true; // Fail open — default to enabled
+        }
+    }
+
+    async setTitleDefendMode(enabled) {
+        try {
+            await this.client.set('svs:titledefends:enabled', enabled ? 'true' : 'false');
+        } catch (error) {
+            console.error('Error setting title defend mode:', error);
+            logError('Error setting title defend mode', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = new RedisClient();
