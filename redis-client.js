@@ -3,6 +3,22 @@ const Redis = require('ioredis');
 const moment = require('moment-timezone');
 const { logError } = require('./logger');
 const { EventEmitter } = require('events');
+const { LADDERS, DEFAULT_LADDER_KEY } = require('./config/ladders');
+
+// Resolve a ladder's Redis key prefix from a ladder config object, a ladder key
+// string ('main' | 'lld'), or nothing (defaults to the main ladder). Keeps every
+// challenge / cooldown / warning key namespaced per ladder so the two ladders
+// never collide for the same player + element.
+// See SEASON_AND_LLD_LADDER_PLAN.md §4.4.
+function ladderPrefix(ladder) {
+    if (ladder && typeof ladder === 'object' && ladder.redisPrefix) {
+        return ladder.redisPrefix;
+    }
+    if (typeof ladder === 'string' && LADDERS[ladder]) {
+        return LADDERS[ladder].redisPrefix;
+    }
+    return LADDERS[DEFAULT_LADDER_KEY].redisPrefix;
+}
 
 // Map timezone abbreviations to IANA timezone names
 const timezoneMap = {
@@ -110,26 +126,28 @@ class RedisClient extends EventEmitter {
         });
     }
 
-    // Key format: `cooldown:${discordId1}-${element1}:${discordId2}-${element2}`
-    generateCooldownKey(player1, player2) {
+    // Key format: `cooldown:${ladder}:${discordId1}-${element1}:${discordId2}-${element2}`
+    generateCooldownKey(player1, player2, ladder) {
+        const prefix = ladderPrefix(ladder);
         const pair = [
             `${player1.discordId}-${player1.element}`,
             `${player2.discordId}-${player2.element}`
         ].sort(); // Sort to ensure consistent key regardless of order
-        return `cooldown:${pair[0]}:${pair[1]}`;
+        return `cooldown:${prefix}:${pair[0]}:${pair[1]}`;
     }
 
-    // Key format: `challenge:${discordId1}-${element1}:${discordId2}-${element2}`
-    generateChallengeKey(player1, player2) {
+    // Key format: `challenge:${ladder}:${discordId1}-${element1}:${discordId2}-${element2}`
+    generateChallengeKey(player1, player2, ladder) {
+        const prefix = ladderPrefix(ladder);
         const pair = [
             `${player1.discordId}-${player1.element}`,
             `${player2.discordId}-${player2.element}`
         ].sort(); // Sort to ensure consistent key regardless of order
-        return `challenge:${pair[0]}:${pair[1]}`;
+        return `challenge:${prefix}:${pair[0]}:${pair[1]}`;
     }
 
-    async setCooldown(player1, player2) {
-        const key = this.generateCooldownKey(player1, player2);
+    async setCooldown(player1, player2, ladder) {
+        const key = this.generateCooldownKey(player1, player2, ladder);
         const expiryTime = 24 * 60 * 60; // 24 hours in seconds
         const cooldownData = JSON.stringify({
             player1: {
@@ -199,9 +217,9 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async setChallenge(player1, player2, challengeDate) {
-        const key = this.generateChallengeKey(player1, player2);
-        
+    async setChallenge(player1, player2, challengeDate, ladder) {
+        const key = this.generateChallengeKey(player1, player2, ladder);
+
         let expiryTime;
         if (challengeDate) {
             // Parse challenge date and calculate TTL based on 3-day expiration from that date
@@ -249,8 +267,8 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async updateChallenge(player1, player2, newChallengeDate) {
-        const key = this.generateChallengeKey(player1, player2);
+    async updateChallenge(player1, player2, newChallengeDate, ladder) {
+        const key = this.generateChallengeKey(player1, player2, ladder);
         // Reset to 3 days from now
         const expiryTime = 3 * 24 * 60 * 60;
         // 24 hours before expiration (for warning) - 2 days
@@ -292,9 +310,9 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async checkChallenge(player1, player2) {
-        const key = this.generateChallengeKey(player1, player2);
-        
+    async checkChallenge(player1, player2, ladder) {
+        const key = this.generateChallengeKey(player1, player2, ladder);
+
         try {
             const challengeData = await this.client.get(key);
             if (challengeData) {
@@ -323,19 +341,22 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async getAllChallenges() {
+    async getAllChallenges(ladder) {
         try {
-            const keys = await this.client.keys('challenge:*');
+            // Scan only the requested ladder's namespace when provided, else all.
+            const pattern = ladder ? `challenge:${ladderPrefix(ladder)}:*` : 'challenge:*';
+            const keys = await this.client.keys(pattern);
             const challenges = [];
-            
+
             for (const key of keys) {
                 const challengeData = await this.client.get(key);
                 const ttl = await this.client.ttl(key);
-                
+
                 if (challengeData) {
                     const data = JSON.parse(challengeData);
                     challenges.push({
                         key: key,
+                        ladder: key.split(':')[1], // namespace segment
                         player1: data.player1,
                         player2: data.player2,
                         challengeDate: data.challengeDate,
@@ -354,8 +375,8 @@ class RedisClient extends EventEmitter {
     }
 
     // Create or check a warning lock to prevent duplicate notifications
-    async markChallengeWarningAsSent(player1, player2) {
-        const key = this.generateChallengeKey(player1, player2);
+    async markChallengeWarningAsSent(player1, player2, ladder) {
+        const key = this.generateChallengeKey(player1, player2, ladder);
         const warningLockKey = `warning-lock:${key.substring(10)}`;
         
         try {
@@ -379,8 +400,8 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async removeChallenge(player1, player2) {
-        const key = this.generateChallengeKey(player1, player2);
+    async removeChallenge(player1, player2, ladder) {
+        const key = this.generateChallengeKey(player1, player2, ladder);
         const warningKey = `challenge-warning:${key.substring(10)}`;
         
         try {
@@ -396,9 +417,9 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async checkCooldown(player1, player2) {
-        const key = this.generateCooldownKey(player1, player2);
-        
+    async checkCooldown(player1, player2, ladder) {
+        const key = this.generateCooldownKey(player1, player2, ladder);
+
         try {
             const cooldownData = await this.client.get(key);
             if (cooldownData) {
@@ -427,9 +448,9 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async removeCooldown(player1, player2) {
-        const key = this.generateCooldownKey(player1, player2);
-        
+    async removeCooldown(player1, player2, ladder) {
+        const key = this.generateCooldownKey(player1, player2, ladder);
+
         try {
             await this.client.del(key);
             console.log(`Removed cooldown for ${key}`);
@@ -442,18 +463,20 @@ class RedisClient extends EventEmitter {
     }
 
     // Debug method to list all active cooldowns
-    async listAllCooldowns() {
+    async listAllCooldowns(ladder) {
         try {
-            const keys = await this.client.keys('cooldown:*');
+            const pattern = ladder ? `cooldown:${ladderPrefix(ladder)}:*` : 'cooldown:*';
+            const keys = await this.client.keys(pattern);
             const cooldowns = [];
-            
+
             for (const key of keys) {
                 const cooldownData = await this.client.get(key);
                 const ttl = await this.client.ttl(key);
-                
+
                 if (cooldownData) {
                     const data = JSON.parse(cooldownData);
                     cooldowns.push({
+                        ladder: key.split(':')[1], // namespace segment
                         player1: data.player1,
                         player2: data.player2,
                         remainingTime: ttl
@@ -470,11 +493,12 @@ class RedisClient extends EventEmitter {
     }
 
     // Helper method to get all cooldowns for a specific player's Discord ID
-    async getPlayerCooldowns(discordId) {
+    async getPlayerCooldowns(discordId, ladder) {
         try {
-            const keys = await this.client.keys('cooldown:*');
+            const pattern = ladder ? `cooldown:${ladderPrefix(ladder)}:*` : 'cooldown:*';
+            const keys = await this.client.keys(pattern);
             const cooldowns = [];
-            
+
             for (const key of keys) {
                 const cooldownData = await this.client.get(key);
                 if (cooldownData) {
@@ -482,6 +506,7 @@ class RedisClient extends EventEmitter {
                     if (data.player1.discordId === discordId || data.player2.discordId === discordId) {
                         const ttl = await this.client.ttl(key);
                         cooldowns.push({
+                            ladder: key.split(':')[1], // namespace segment
                             opponent: data.player1.discordId === discordId ? data.player2 : data.player1,
                             remainingTime: ttl
                         });
