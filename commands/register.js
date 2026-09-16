@@ -5,7 +5,7 @@ require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromOption } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -60,7 +60,15 @@ module.exports = {
         .addStringOption(option =>
             option.setName('notes')
                 .setDescription('Optional notes for the character')
-                .setRequired(false)),
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('ladder')
+                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'LLD', value: 'lld' }
+                )),
 
     async autocomplete(interaction) {
         const focusedOption = interaction.options.getFocused(true);
@@ -90,9 +98,8 @@ module.exports = {
     async execute(interaction) {
         await interaction.deferReply(); // Defer the reply to prevent timeout issues
 
-        // Resolve the ladder (default: main). Phase 2 will read this from the
-        // optional `ladder` option; for now it is pinned to main.
-        const ladder = getLadderByKey('main');
+        // Resolve the ladder from the optional `ladder` option (default: main).
+        const ladder = getLadderFromOption(interaction);
 
         // Check if the user has the '@SvS Manager' role
         const managerRole = interaction.guild.roles.cache.find(role => role.name === 'SvS Manager');

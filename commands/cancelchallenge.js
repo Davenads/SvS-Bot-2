@@ -2,7 +2,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const redisClient = require('../redis-client');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
 
 const elementEmojis = {
   'Fire': '🔥',
@@ -39,9 +39,9 @@ module.exports = {
         auth: getGoogleAuth()
       });
       
-      // Resolve the ladder (default: main). Phase 2 will read this from the
-      // channel; for now it is pinned to main (behavior-neutral).
-      const ladder = getLadderByKey('main');
+      // Infer the ladder from the challenge channel the command was run in;
+      // fall back to main when run outside a configured challenge channel.
+      const ladder = getLadderFromChannel(interaction.channelId) || getLadderByKey('main');
       const sheetName = ladder.sheetName;
       console.log('Fetching data from Google Sheets...');
       const result = await sheets.spreadsheets.values.get({

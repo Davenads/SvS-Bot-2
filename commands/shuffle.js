@@ -4,7 +4,7 @@ const { google } = require('googleapis');
 const { logError } = require('../logger');
 const redisClient = require('../redis-client');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromOption } = require('../utils/ladder');
 
 const sheets = google.sheets({
     version: 'v4',
@@ -22,7 +22,15 @@ module.exports = {
                 .setName('clear_cooldowns')
                 .setDescription('Remove all cooldown restrictions between players (default: false)')
                 .setRequired(false)
-        ),
+        )
+        .addStringOption(option =>
+            option.setName('ladder')
+                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'LLD', value: 'lld' }
+                )),
 
     async execute(interaction) {
         const timestamp = new Date().toISOString();
@@ -31,9 +39,8 @@ module.exports = {
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        // Resolve the ladder (default: main). Phase 2 will read this from the
-        // channel/option; for now it is pinned to main (behavior-neutral).
-        const ladder = getLadderByKey('main');
+        // Resolve the ladder from the optional `ladder` option (default: main).
+        const ladder = getLadderFromOption(interaction);
 
         // Check for SvS Manager role
         const managerRole = interaction.guild.roles.cache.find(

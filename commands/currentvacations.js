@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { google } = require('googleapis');
 const { logError } = require('../logger'); // Import the logger
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromOption } = require('../utils/ladder');
 
 const sheets = google.sheets({
   version: 'v4',
@@ -15,13 +15,20 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('currentvacations')
-        .setDescription('Display all players currently on vacation'),
+        .setDescription('Display all players currently on vacation')
+        .addStringOption(option =>
+            option.setName('ladder')
+                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'LLD', value: 'lld' }
+                )),
     
     async execute(interaction) {
         try {
-            // Resolve the ladder (default: main). Phase 2 will derive this from a
-            // `ladder` option; for now it is pinned to main (behavior-neutral).
-            const ladder = getLadderByKey('main');
+            // Resolve the ladder from the optional `ladder` option (default: main).
+            const ladder = getLadderFromOption(interaction);
 
             // Fetch all data from the sheet dynamically
             const result = await sheets.spreadsheets.values.get({

@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromOption } = require('../utils/ladder');
 
 const sheets = google.sheets({
   version: 'v4',
@@ -43,14 +43,24 @@ module.exports = {
         .setDescription('The name of the player to insert')
         .setRequired(true)
         .setAutocomplete(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName('ladder')
+        .setDescription('Which ladder (defaults to SvS Standard)')
+        .setRequired(false)
+        .addChoices(
+          { name: 'SvS (Standard)', value: 'main' },
+          { name: 'LLD', value: 'lld' }
+        )
     ),
 
   async autocomplete(interaction) {
     const focusedValue = interaction.options.getFocused().toLowerCase();
 
-    // Resolve the ladder (default: main). Autocomplete runs before the user can
-    // pick a ladder, so Phase 0 pins it to main (behavior-neutral).
-    const ladder = getLadderByKey('main');
+    // Resolve the ladder from the `ladder` option (default: main). If the user
+    // has not yet picked a ladder while autocompleting, this falls back to main.
+    const ladder = getLadderFromOption(interaction);
 
     try {
       const result = await sheets.spreadsheets.values.get({
@@ -85,9 +95,8 @@ module.exports = {
 
     await interaction.deferReply({ ephemeral: true });
 
-    // Resolve the ladder (default: main). Phase 2 will read this from the
-    // optional `ladder` option; for now it is pinned to main.
-    const ladder = getLadderByKey('main');
+    // Resolve the ladder from the optional `ladder` option (default: main).
+    const ladder = getLadderFromOption(interaction);
 
     const managerRole = interaction.guild.roles.cache.find(
       role => role.name === 'SvS Manager'

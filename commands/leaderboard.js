@@ -2,7 +2,7 @@ require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromOption } = require('../utils/ladder');
 const { logError } = require('../logger');
 
 // Initialize Google Sheets API client
@@ -16,7 +16,15 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('leaderboard')
-        .setDescription('Displays the SvS leaderboard with specs and elements'),
+        .setDescription('Displays the SvS leaderboard with specs and elements')
+        .addStringOption(option =>
+            option.setName('ladder')
+                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'LLD', value: 'lld' }
+                )),
     
     async execute(interaction) {
         console.log(`[${new Date().toISOString()}] Command invoked: /leaderboard by ${interaction.user.tag} (${interaction.user.id})`);
@@ -31,9 +39,8 @@ module.exports = {
         try {
             await deferIfNecessary();
 
-            // Resolve the ladder (default: main). Phase 2 will derive this from a
-            // `ladder` option; for now it is pinned to main (behavior-neutral).
-            const ladder = getLadderByKey('main');
+            // Resolve the ladder from the optional `ladder` option (default: main).
+            const ladder = getLadderFromOption(interaction);
 
             // Fetch data from the Google Sheet
             const result = await sheets.spreadsheets.values.get({

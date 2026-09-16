@@ -3,7 +3,7 @@ const { google } = require('googleapis');
 const moment = require('moment-timezone');  // Use moment-timezone for better timezone handling
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -27,9 +27,9 @@ module.exports = {
         
         await interaction.deferReply({ ephemeral: true });
 
-        // Resolve the ladder (default: main). Phase 2 will read this from the
-        // channel; for now it is pinned to main (behavior-neutral).
-        const ladder = getLadderByKey('main');
+        // Infer the ladder from the challenge channel the command was run in;
+        // fall back to main when run outside a configured challenge channel.
+        const ladder = getLadderFromChannel(interaction.channelId) || getLadderByKey('main');
 
         try {
             // Check if the user has the '@SvS Manager' role

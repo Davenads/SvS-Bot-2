@@ -6,7 +6,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromOption } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -24,7 +24,16 @@ module.exports = {
             option
                 .setName('rank')
                 .setDescription('The rank of the player who dodged')
-                .setRequired(true)),
+                .setRequired(true))
+        .addStringOption(option =>
+            option
+                .setName('ladder')
+                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'LLD', value: 'lld' }
+                )),
 
     async execute(interaction) {
         // Check if user has SvS Manager role
@@ -37,9 +46,8 @@ module.exports = {
 
         await interaction.deferReply({ ephemeral: true });
 
-        // Resolve the ladder (default: main). Phase 2 will read this from the
-        // optional `ladder` option; for now it is pinned to main.
-        const ladder = getLadderByKey('main');
+        // Resolve the ladder from the optional `ladder` option (default: main).
+        const ladder = getLadderFromOption(interaction);
 
         const timestamp = new Date().toISOString();
         console.log(`\n[${timestamp}] Dodge Command`);

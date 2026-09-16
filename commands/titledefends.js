@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { google } = require('googleapis');
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromOption } = require('../utils/ladder');
 
 // Initialize Google Sheets API client
 const sheets = google.sheets({
@@ -34,15 +34,22 @@ const FOOTER_MESSAGES = [
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('titledefends')
-        .setDescription('Display the leaderboard of successful title defenses'),
+        .setDescription('Display the leaderboard of successful title defenses')
+        .addStringOption(option =>
+            option.setName('ladder')
+                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'LLD', value: 'lld' }
+                )),
 
     async execute(interaction) {
         console.log(`[${new Date().toISOString()}] Command invoked: /titledefends by ${interaction.user.tag} (${interaction.user.id})`);
         await interaction.deferReply({ ephemeral: true });
 
-        // Resolve the ladder (default: main). Phase 2 will derive this from a
-        // `ladder` option; for now it is pinned to main (behavior-neutral).
-        const ladder = getLadderByKey('main');
+        // Resolve the ladder from the optional `ladder` option (default: main).
+        const ladder = getLadderFromOption(interaction);
 
         try {
             // Fetch title defends data from Metrics tab

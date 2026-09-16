@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { logError } = require('../logger'); // Import the logger
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
 
 const sheets = google.sheets({
   version: 'v4',
@@ -24,9 +24,9 @@ module.exports = {
             const timestamp = new Date().toISOString();
             console.log(`[${timestamp}] /currentchallenges command executed by ${user}`);
 
-            // Resolve the ladder (default: main). Phase 2 will infer this from the
-            // channel; for now it is pinned to main (behavior-neutral).
-            const ladder = getLadderByKey('main');
+            // Infer the ladder from the challenge channel the command was run in;
+            // fall back to main when run outside a configured challenge channel.
+            const ladder = getLadderFromChannel(interaction.channelId) || getLadderByKey('main');
 
             // Fetch all data from the sheet dynamically
             const result = await sheets.spreadsheets.values.get({

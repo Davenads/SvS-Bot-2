@@ -4,7 +4,7 @@ const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { logError } = require('../logger');
 const redisClient = require('../redis-client');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderByKey, getLadderFromOption } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -47,7 +47,15 @@ module.exports = {
             option.setName('recalculate_ttl')
                 .setDescription('Recalculate challenge expiration times from cDate column')
                 .setRequired(false)
-        ),
+        )
+        .addStringOption(option =>
+            option.setName('ladder')
+                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'LLD', value: 'lld' }
+                )),
 
     async execute(interaction) {
         const timestamp = new Date().toISOString();
@@ -75,9 +83,8 @@ module.exports = {
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        // Resolve the ladder (default: main). Phase 2 will read this from the
-        // channel/option; for now it is pinned to main (behavior-neutral).
-        const ladder = getLadderByKey('main');
+        // Resolve the ladder from the optional `ladder` option (default: main).
+        const ladder = getLadderFromOption(interaction);
 
         // Send immediate status update
         await interaction.editReply({ content: '🔄 Starting Redis sync operation...' });

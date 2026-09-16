@@ -7,7 +7,7 @@ const { google } = require('googleapis')
 const { logError } = require('../logger')
 const redisClient = require('../redis-client');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromChannel } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -69,12 +69,13 @@ module.exports = {
     ),
 
   async execute (interaction) {
-    // Resolve the ladder (default: main). Phase 2 will infer this from the
-    // channel; for now it is pinned to main (behavior-neutral).
-    const ladder = getLadderByKey('main')
-    if (interaction.channelId !== ladder.challengeChannelId) {
+    // Infer the ladder from the channel the command was run in. The standard
+    // SvS challenge channel resolves to main; the LLD challenge channel resolves
+    // to lld. Any other channel is rejected.
+    const ladder = getLadderFromChannel(interaction.channelId)
+    if (!ladder) {
       return await interaction.reply({
-        content: 'This command can only be used in the #challenges channel.',
+        content: 'This command can only be used in a challenge channel.',
         ephemeral: true
       })
     }

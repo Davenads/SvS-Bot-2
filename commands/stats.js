@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderByKey } = require('../utils/ladder');
+const { getLadderFromOption } = require('../utils/ladder');
 
 const sheets = google.sheets({
     version: 'v4',
@@ -20,7 +20,15 @@ const elementEmojis = {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('stats')
-        .setDescription('Display current ladder statistics and metrics'),
+        .setDescription('Display current ladder statistics and metrics')
+        .addStringOption(option =>
+            option.setName('ladder')
+                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'LLD', value: 'lld' }
+                )),
 
     async execute(interaction) {
         console.log(`[${new Date().toISOString()}] Command invoked: /stats by ${interaction.user.tag} (${interaction.user.id})`);
@@ -33,9 +41,8 @@ module.exports = {
         };
         await deferIfNecessary();
 
-        // Resolve the ladder (default: main). Phase 2 will derive this from a
-        // `ladder` option; for now it is pinned to main (behavior-neutral).
-        const ladder = getLadderByKey('main');
+        // Resolve the ladder from the optional `ladder` option (default: main).
+        const ladder = getLadderFromOption(interaction);
 
         try {
             console.log('├─ Fetching metrics and title defense data...');

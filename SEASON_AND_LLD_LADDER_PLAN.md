@@ -484,10 +484,31 @@ Metrics `A11:D`, per-ladder title-defend key, `Seasons` / `Season Champions` /
 `/titledefends` + `/stats` + `/titledefendmode`. Backfill migration. This is the
 **time-sensitive** piece for the 9/1 reset — can ship independently of LLD.
 
-**Phase 2 — Activate the LLD ladder (satisfies request 2).**
+**Phase 2 — Activate the LLD ladder (satisfies request 2). — COMMAND ROUTING LIVE.**
 Add `ladder` option to all commands, wire LLD `sheetId`/channel/`LLD Metrics`,
 confirm LLD tab prerequisites, deploy. LLD inherits seasons from Phase 1
 automatically.
+
+*Status (routing activated; taken before Phase 1 since the 9/1 window passed):*
+- **Challenge-lifecycle commands infer the ladder from the channel** via
+  `getLadderFromChannel(interaction.channelId)` — the standard SvS channel →
+  main, the LLD channel (`1547283140995719258`) → lld. `challenge` / `reportwin`
+  now reject any non-challenge channel; `cancelchallenge` / `extendchallenge` /
+  `nullchallenges` / `currentchallenges` infer from channel and fall back to main
+  outside a challenge channel (preserves prior any-channel behavior).
+- **Every other ladder-scoped command carries an optional `ladder` string
+  option** (`SvS (Standard)` = main / `LLD` = lld) resolved through
+  `getLadderFromOption(interaction)`; omitting it defaults to main, so existing
+  invocations are unchanged. Applied to `register`, `remove`, `dodge`, `bench`,
+  `insert`, `leaderboard`, `stats`, `titledefends`, `extendedvacations`,
+  `currentvacations`, `shuffle`, `syncredis`. The option is appended last in each
+  builder so it always follows any required options.
+- All 16 commands pass `node -c`; `deploy-commands.js` reloaded both the test and
+  live guilds with no schema-validation errors.
+- Remaining Phase 2 work: end-to-end LLD isolation test (same-element player on
+  both ladders, independent challenges/cooldowns, correct channel announcements
+  and expiry routing) before relying on it in production. `/help` copy still
+  documents only the standard ladder (Phase 3).
 
 **Phase 3 — Polish.**
 Update `/help`, `README.md`, portfolio screenshots; optional per-ladder
