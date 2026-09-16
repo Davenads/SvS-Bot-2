@@ -3,6 +3,7 @@ const { google } = require('googleapis');
 const moment = require('moment-timezone');  // Use moment-timezone for better timezone handling
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -11,7 +12,6 @@ const sheets = google.sheets({
   });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
 const DEFAULT_TIMEZONE = 'America/New_York'; // The timezone used for challenge dates
 const MAX_CHALLENGE_DAYS = 2; // Maximum number of days a challenge can be active
 
@@ -27,6 +27,10 @@ module.exports = {
         
         await interaction.deferReply({ ephemeral: true });
 
+        // Resolve the ladder (default: main). Phase 2 will read this from the
+        // channel; for now it is pinned to main (behavior-neutral).
+        const ladder = getLadderByKey('main');
+
         try {
             // Check if the user has the '@SvS Manager' role
             const managerRole = interaction.guild.roles.cache.find(role => role.name === 'SvS Manager');
@@ -41,7 +45,7 @@ module.exports = {
             // Fetch data from the Google Sheet
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:K`,
+                range: `${ladder.sheetName}!A2:K`,
             });
 
             const rows = result.data.values;
@@ -173,7 +177,7 @@ module.exports = {
                 requests.push({
                     updateCells: {
                         range: {
-                            sheetId: sheetId,
+                            sheetId: ladder.sheetId,
                             startRowIndex: challenge.rowIndex + 1,
                             endRowIndex: challenge.rowIndex + 2,
                             startColumnIndex: 5, // Column F (Status)
@@ -197,7 +201,7 @@ module.exports = {
                     requests.push({
                         updateCells: {
                             range: {
-                                sheetId: sheetId,
+                                sheetId: ladder.sheetId,
                                 startRowIndex: opponentRowIndex + 1,
                                 endRowIndex: opponentRowIndex + 2,
                                 startColumnIndex: 5, // Column F (Status)

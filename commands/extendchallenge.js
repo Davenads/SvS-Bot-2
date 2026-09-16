@@ -3,6 +3,7 @@ require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { DateTime } = require('luxon');
 const redisClient = require('../redis-client');
+const { getLadderByKey } = require('../utils/ladder');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -33,7 +34,10 @@ module.exports = {
         auth: getGoogleAuth()
       });
       
-      const sheetName = 'SvS Ladder';
+      // Resolve the ladder (default: main). Phase 2 will read this from the
+      // channel; for now it is pinned to main (behavior-neutral).
+      const ladder = getLadderByKey('main');
+      const sheetName = ladder.sheetName;
       console.log('Fetching data from Google Sheets...');
       const result = await sheets.spreadsheets.values.get({
         spreadsheetId: process.env.SPREADSHEET_ID,
@@ -151,7 +155,7 @@ module.exports = {
         discordId: opponentRow[8],
         element: opponentRow[3]
       };
-      await redisClient.updateChallenge(player1, player2, formattedDate);
+      await redisClient.updateChallenge(player1, player2, formattedDate, ladder);
       console.log('Redis challenge updated successfully');
 
       // Prepare an embed message to confirm the extension

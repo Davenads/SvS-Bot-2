@@ -2,6 +2,7 @@ const { GoogleSpreadsheet } = require('google-spreadsheet');
 require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const redisClient = require('../redis-client');
+const { getLadderByKey } = require('../utils/ladder');
 
 const elementEmojis = {
   'Fire': '🔥',
@@ -38,7 +39,10 @@ module.exports = {
         auth: getGoogleAuth()
       });
       
-      const sheetName = 'SvS Ladder';
+      // Resolve the ladder (default: main). Phase 2 will read this from the
+      // channel; for now it is pinned to main (behavior-neutral).
+      const ladder = getLadderByKey('main');
+      const sheetName = ladder.sheetName;
       console.log('Fetching data from Google Sheets...');
       const result = await sheets.spreadsheets.values.get({
         spreadsheetId: process.env.SPREADSHEET_ID,
@@ -110,7 +114,7 @@ module.exports = {
           discordId: opponentRow[8],
           element: opponentRow[3]
         };
-        await redisClient.removeChallenge(player1, player2);
+        await redisClient.removeChallenge(player1, player2, ladder);
         console.log('Challenge removed from Redis');
       } catch (error) {
         console.error('Error removing challenge from Redis:', error);
