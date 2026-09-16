@@ -36,6 +36,48 @@ function getLadderFromChannel(channelId) {
   );
 }
 
+// Resolve a ladder config from a Redis key prefix ('main' | 'lld'). Falls back
+// to the default ladder for an unknown / missing prefix so legacy keys resolve
+// to main. Used by the expiry handler/checker.
+function getLadderByRedisPrefix(prefix) {
+  return (
+    Object.values(LADDERS).find(l => l.redisPrefix === prefix) ||
+    LADDERS[DEFAULT_LADDER_KEY]
+  );
+}
+
+// Parse an expired/active challenge Redis key into its ladder + player parts.
+// Handles both formats:
+//   new:    challenge:{ladder}:{id1}-{el1}:{id2}-{el2}   (3 colon segments)
+//   legacy: challenge:{id1}-{el1}:{id2}-{el2}            (2 colon segments)
+// The legacy form (pre key-namespacing) is tolerated so in-flight challenges
+// created before the migration still auto-null correctly during the drain.
+function parseChallengeKey(challengeKey) {
+  const body = challengeKey.replace(/^challenge:/, '');
+  const parts = body.split(':');
+
+  let prefix;
+  let p1;
+  let p2;
+  if (parts.length >= 3) {
+    [prefix, p1, p2] = parts;
+  } else {
+    [p1, p2] = parts;
+    prefix = LADDERS[DEFAULT_LADDER_KEY].redisPrefix;
+  }
+
+  const [discordId1, element1] = (p1 || '').split('-');
+  const [discordId2, element2] = (p2 || '').split('-');
+
+  return {
+    ladder: getLadderByRedisPrefix(prefix),
+    discordId1,
+    element1,
+    discordId2,
+    element2,
+  };
+}
+
 // Convenience: comma-free human list of the configured challenge channels, for
 // error messages.
 function challengeChannelMention(ladder) {
@@ -46,5 +88,7 @@ module.exports = {
   getLadderByKey,
   getLadderFromOption,
   getLadderFromChannel,
+  getLadderByRedisPrefix,
+  parseChallengeKey,
   challengeChannelMention,
 };

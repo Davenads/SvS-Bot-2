@@ -6,6 +6,7 @@ const moment = require('moment-timezone');
 const redisClient = require('./redis-client');
 const { logError } = require('./logger');
 const { getGoogleAuth } = require('./fixGoogleAuth');
+const { parseChallengeKey, getLadderByRedisPrefix } = require('./utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -14,10 +15,10 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_NAME = 'SvS Ladder';
-const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
-const CHALLENGES_CHANNEL_ID = '1330563945341390959';
 const DEFAULT_TIMEZONE = 'America/New_York';
+// Ladder-specific sheet name, numeric sheetId, and challenges channel are now
+// resolved per challenge from the Redis key via parseChallengeKey() / the
+// challenge's ladder segment. See SEASON_AND_LLD_LADDER_PLAN.md §4.4.
 
 // Emoji maps for spec and element indicators
 const specEmojiMap = {
@@ -51,9 +52,10 @@ function initializeChallengeExpiryHandler(client) {
 
       const parsedData = JSON.parse(challengeData);
       const { player1, player2 } = parsedData;
+      const { ladder } = parseChallengeKey(challengeKey);
 
       // Try to acquire a lock to prevent duplicate warnings
-      const canSendWarning = await redisClient.markChallengeWarningAsSent(player1, player2);
+      const canSendWarning = await redisClient.markChallengeWarningAsSent(player1, player2, ladder);
 
       if (canSendWarning) {
         await handleChallengeWarning(client, challengeKey);
@@ -96,13 +98,14 @@ async function handleChallengeWarning(client, challengeKey) {
 
     const parsedData = JSON.parse(challengeData);
     const { player1, player2 } = parsedData;
+    const { ladder } = parseChallengeKey(challengeKey);
 
-    console.log(`[CHALLENGE EXPIRY HANDLER] Processing warning for challenge between ${player1.name} and ${player2.name}`);
-    
-    // Fetch the challenges channel
-    const challengesChannel = await client.channels.fetch(CHALLENGES_CHANNEL_ID);
+    console.log(`[CHALLENGE EXPIRY HANDLER] Processing ${ladder.displayName} warning for challenge between ${player1.name} and ${player2.name}`);
+
+    // Fetch the ladder's challenges channel
+    const challengesChannel = await client.channels.fetch(ladder.challengeChannelId);
     if (!challengesChannel) {
-      console.error('Could not find challenges channel!');
+      console.error(`Could not find challenges channel for ${ladder.displayName}!`);
       return;
     }
     
@@ -139,19 +142,16 @@ async function handleChallengeExpiration(client, challengeKey) {
   console.log(`[CHALLENGE EXPIRY HANDLER] Processing expiration for challenge ${challengeKey}`);
 
   try {
-    // Parse player info from the key
-    // Format: challenge:discordId1-element1:discordId2-element2
-    const keyPart = challengeKey.substring(10); // Remove 'challenge:' prefix
-    const [player1Key, player2Key] = keyPart.split(':');
-    const [discordId1, element1] = player1Key.split('-');
-    const [discordId2, element2] = player2Key.split('-');
+    // Parse ladder + player info from the key
+    // Format: challenge:{ladder}:discordId1-element1:discordId2-element2
+    const { ladder, discordId1, element1, discordId2, element2 } = parseChallengeKey(challengeKey);
 
-    console.log(`[CHALLENGE EXPIRY HANDLER] Parsed from key: Player1(${discordId1}, ${element1}), Player2(${discordId2}, ${element2})`);
+    console.log(`[CHALLENGE EXPIRY HANDLER] Parsed ${ladder.displayName} key: Player1(${discordId1}, ${element1}), Player2(${discordId2}, ${element2})`);
 
-    // Fetch current data from Google Sheets
+    // Fetch current data from the ladder's Google Sheet tab
     const sheetData = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${SHEET_NAME}!A2:K`
+      range: `${ladder.sheetName}!A2:K`
     });
 
     const rows = sheetData.data.values || [];
@@ -200,7 +200,7 @@ async function handleChallengeExpiration(client, challengeKey) {
     requests.push({
       updateCells: {
         range: {
-          sheetId: sheetId,
+          sheetId: ladder.sheetId,
           startRowIndex: player1RowIndex + 1,
           endRowIndex: player1RowIndex + 2,
           startColumnIndex: 5, // Column F (Status)
@@ -221,7 +221,7 @@ async function handleChallengeExpiration(client, challengeKey) {
     requests.push({
       updateCells: {
         range: {
-          sheetId: sheetId,
+          sheetId: ladder.sheetId,
           startRowIndex: player2RowIndex + 1,
           endRowIndex: player2RowIndex + 2,
           startColumnIndex: 5, // Column F (Status)
@@ -263,12 +263,12 @@ async function handleChallengeExpiration(client, challengeKey) {
       resource: { requests }
     });
     
-    console.log(`Google Sheet updated for expired challenge: ${player1Row[1]} vs ${player2Row[1]}`);
+    console.log(`Google Sheet updated for expired ${ladder.displayName} challenge: ${player1Row[1]} vs ${player2Row[1]}`);
 
-    // Fetch the challenges channel
-    const challengesChannel = await client.channels.fetch(CHALLENGES_CHANNEL_ID);
+    // Fetch the ladder's challenges channel
+    const challengesChannel = await client.channels.fetch(ladder.challengeChannelId);
     if (!challengesChannel) {
-      console.error('Could not find challenges channel!');
+      console.error(`Could not find challenges channel for ${ladder.displayName}!`);
       return;
     }
     
@@ -351,7 +351,8 @@ async function runSafetyCheck(client) {
         console.log(`Safety check: Challenge ${key} should be sending warning soon`);
 
         // Try to acquire a lock to prevent duplicate warnings
-        const canSendWarning = await redisClient.markChallengeWarningAsSent(challenge.player1, challenge.player2);
+        const ladder = getLadderByRedisPrefix(challenge.ladder);
+        const canSendWarning = await redisClient.markChallengeWarningAsSent(challenge.player1, challenge.player2, ladder);
 
         if (canSendWarning) {
           // The warning key should have expired, but just in case, trigger the warning

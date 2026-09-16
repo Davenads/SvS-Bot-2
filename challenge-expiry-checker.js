@@ -5,6 +5,7 @@ const { google } = require('googleapis');
 const moment = require('moment-timezone');
 const redisClient = require('./redis-client');
 const { logError } = require('./logger');
+const { getLadderByRedisPrefix } = require('./utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -18,10 +19,9 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_NAME = 'SvS Ladder';
-const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
-const CHALLENGES_CHANNEL_ID = '1330563945341390959';
 const DEFAULT_TIMEZONE = 'America/New_York';
+// Sheet name, numeric sheetId, and challenges channel are resolved per challenge
+// from each challenge's ladder segment. See SEASON_AND_LLD_LADDER_PLAN.md §4.4.
 
 // Emoji maps for spec and element indicators
 const specEmojiMap = {
@@ -44,37 +44,51 @@ async function checkChallengeExpirations(client) {
   console.log('\n[CHALLENGE EXPIRY CHECKER] Starting challenge expiration check...');
   
   try {
-    // Get all active challenges from Redis
+    // Get all active challenges from Redis (spanning all ladders)
     const activeChallenges = await redisClient.getAllChallenges();
     console.log(`Found ${activeChallenges.length} active challenges in Redis`);
-    
+
     if (activeChallenges.length === 0) {
       console.log('No active challenges to check. Exiting.');
       return;
     }
 
-    // Fetch current data from Google Sheets for verification
-    const sheetData = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${SHEET_NAME}!A2:K`
-    });
-    
-    const rows = sheetData.data.values || [];
-    if (!rows.length) {
-      console.log('No data found in Google Sheets. Exiting.');
-      return;
-    }
-
-    const challengesChannel = await client.channels.fetch(CHALLENGES_CHANNEL_ID);
-    if (!challengesChannel) {
-      console.error('Could not find challenges channel!');
-      return;
-    }
+    // Lazily fetch + cache each ladder's rows and channel so a single pass can
+    // span multiple ladders without redundant API calls.
+    const rowsCache = {};
+    const channelCache = {};
+    const getRows = async (ladder) => {
+      if (!(ladder.sheetName in rowsCache)) {
+        const sheetData = await sheets.spreadsheets.values.get({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `${ladder.sheetName}!A2:K`
+        });
+        rowsCache[ladder.sheetName] = sheetData.data.values || [];
+      }
+      return rowsCache[ladder.sheetName];
+    };
+    const getChannel = async (ladder) => {
+      if (!(ladder.challengeChannelId in channelCache)) {
+        channelCache[ladder.challengeChannelId] = await client.channels.fetch(ladder.challengeChannelId);
+      }
+      return channelCache[ladder.challengeChannelId];
+    };
 
     // Process each active challenge
     for (const challenge of activeChallenges) {
       const { player1, player2, remainingTime, warningNotificationSent } = challenge;
-      console.log(`Processing challenge between ${player1.name} and ${player2.name} - Remaining time: ${remainingTime}s`);
+      const ladder = getLadderByRedisPrefix(challenge.ladder);
+      const rows = await getRows(ladder);
+      const challengesChannel = await getChannel(ladder);
+      if (!rows.length) {
+        console.log(`No data found in ${ladder.sheetName}. Skipping challenge.`);
+        continue;
+      }
+      if (!challengesChannel) {
+        console.error(`Could not find challenges channel for ${ladder.displayName}!`);
+        continue;
+      }
+      console.log(`Processing ${ladder.displayName} challenge between ${player1.name} and ${player2.name} - Remaining time: ${remainingTime}s`);
 
       // Verify both players are still in a challenge according to the sheet
       const player1Row = rows.find(row => row[8] === player1.discordId && row[3] === player1.element);
@@ -82,7 +96,7 @@ async function checkChallengeExpirations(client) {
 
       if (!player1Row || !player2Row) {
         console.log(`One or both players not found in sheet. Removing challenge from Redis.`);
-        await redisClient.removeChallenge(player1, player2);
+        await redisClient.removeChallenge(player1, player2, ladder);
         continue;
       }
       
@@ -101,7 +115,7 @@ async function checkChallengeExpirations(client) {
         player2Opponent !== player1Rank.toString()
       ) {
         console.log(`Challenge state mismatch between Redis and Google Sheets. Removing from Redis tracking.`);
-        await redisClient.removeChallenge(player1, player2);
+        await redisClient.removeChallenge(player1, player2, ladder);
         continue;
       }
       
@@ -114,7 +128,7 @@ async function checkChallengeExpirations(client) {
         console.log(`Challenge between ${player1.name} and ${player2.name} will expire in less than 24 hours`);
 
         // Try to acquire a lock to prevent duplicate warnings
-        const canSendWarning = await redisClient.markChallengeWarningAsSent(player1, player2);
+        const canSendWarning = await redisClient.markChallengeWarningAsSent(player1, player2, ladder);
 
         if (canSendWarning) {
           // Send warning message
@@ -142,7 +156,7 @@ async function checkChallengeExpirations(client) {
           requests.push({
             updateCells: {
               range: {
-                sheetId: sheetId,
+                sheetId: ladder.sheetId,
                 startRowIndex: player1RowIndex + 1,
                 endRowIndex: player1RowIndex + 2,
                 startColumnIndex: 5, // Column F (Status)
@@ -163,7 +177,7 @@ async function checkChallengeExpirations(client) {
           requests.push({
             updateCells: {
               range: {
-                sheetId: sheetId,
+                sheetId: ladder.sheetId,
                 startRowIndex: player2RowIndex + 1,
                 endRowIndex: player2RowIndex + 2,
                 startColumnIndex: 5, // Column F (Status)
@@ -244,11 +258,11 @@ ${specEmojiMap[player2Row[2]] || ''} ${elementEmojiMap[player2.element] || ''}`,
           console.log('Auto-nullification embed sent to challenges channel');
 
           // Remove from Redis tracking
-          await redisClient.removeChallenge(player1, player2);
+          await redisClient.removeChallenge(player1, player2, ladder);
           console.log('Challenge removed from Redis tracking');
         } else {
           console.log(`Could not find one or both players in sheet. Removing from Redis.`);
-          await redisClient.removeChallenge(player1, player2);
+          await redisClient.removeChallenge(player1, player2, ladder);
         }
       }
     }
