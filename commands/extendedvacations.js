@@ -2,6 +2,7 @@ require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 // Initialize Google Sheets API client
 const sheets = google.sheets({
@@ -10,7 +11,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_NAME = 'Extended Vacation';
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -30,10 +30,14 @@ module.exports = {
         try {
             await deferIfNecessary();
 
+            // Resolve the ladder (default: main). Phase 2 will derive this from a
+            // `ladder` option; for now it is pinned to main (behavior-neutral).
+            const ladder = getLadderByKey('main');
+
             // Fetch data from the Google Sheet
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:H`,
+                range: `${ladder.vacationTab}!A2:H`,
             });
 
             const rows = result.data.values;

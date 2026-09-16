@@ -3,6 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderByKey } = require('../utils/ladder');
+const { logError } = require('../logger');
 
 // Initialize Google Sheets API client
 const sheets = google.sheets({

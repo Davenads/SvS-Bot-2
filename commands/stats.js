@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 const sheets = google.sheets({
     version: 'v4',
@@ -8,7 +9,6 @@ const sheets = google.sheets({
   });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const METRICS_TAB = 'Metrics';
 
 // Element emojis for formatting
 const elementEmojis = {
@@ -33,17 +33,21 @@ module.exports = {
         };
         await deferIfNecessary();
 
+        // Resolve the ladder (default: main). Phase 2 will derive this from a
+        // `ladder` option; for now it is pinned to main (behavior-neutral).
+        const ladder = getLadderByKey('main');
+
         try {
             console.log('├─ Fetching metrics and title defense data...');
             // Fetch both metrics and title defends data
             const [metricsResult, titleDefendsResult] = await Promise.all([
                 sheets.spreadsheets.values.get({
                     spreadsheetId: SPREADSHEET_ID,
-                    range: `${METRICS_TAB}!A1:F8`
+                    range: `${ladder.metricsTab}!A1:F8`
                 }),
                 sheets.spreadsheets.values.get({
                     spreadsheetId: SPREADSHEET_ID,
-                    range: `${METRICS_TAB}!A11:C` // Title defends section
+                    range: `${ladder.metricsTab}!A11:C` // Title defends section
                 })
             ]);
 

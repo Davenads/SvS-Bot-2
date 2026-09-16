@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { google } = require('googleapis');
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 // Initialize Google Sheets API client
 const sheets = google.sheets({
@@ -10,7 +11,6 @@ const sheets = google.sheets({
   });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const METRICS_TAB = 'Metrics';
 const ENTRIES_PER_PAGE = 10;
 
 // Medal emojis for top 3
@@ -40,11 +40,15 @@ module.exports = {
         console.log(`[${new Date().toISOString()}] Command invoked: /titledefends by ${interaction.user.tag} (${interaction.user.id})`);
         await interaction.deferReply({ ephemeral: true });
 
+        // Resolve the ladder (default: main). Phase 2 will derive this from a
+        // `ladder` option; for now it is pinned to main (behavior-neutral).
+        const ladder = getLadderByKey('main');
+
         try {
             // Fetch title defends data from Metrics tab
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${METRICS_TAB}!A11:C` // Title defends section
+                range: `${ladder.metricsTab}!A11:C` // Title defends section
             });
 
             if (!result.data.values) {
