@@ -4,6 +4,7 @@ const { google } = require('googleapis')
 const { logError } = require('../logger')
 const redisClient = require('../redis-client');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 const sheets = google.sheets({
     version: 'v4',
@@ -11,10 +12,6 @@ const sheets = google.sheets({
   });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
-const SHEET_NAME = 'SvS Ladder'
-const TOP_10_MAX_JUMP = 2
-const REGULAR_MAX_JUMP = 3
-const TOP_10_THRESHOLD = 10
 
 // Emoji maps for spec and element indicators
 const specEmojiMap = {
@@ -48,7 +45,10 @@ module.exports = {
     ),
 
   async execute (interaction) {
-    if (interaction.channelId !== '1330563945341390959') {
+    // Resolve the ladder (default: main). Phase 2 will infer this from the
+    // channel; for now it is pinned to main (behavior-neutral).
+    const ladder = getLadderByKey('main')
+    if (interaction.channelId !== ladder.challengeChannelId) {
       return await interaction.reply({
         content: 'This command can only be used in the #challenges channel.',
         ephemeral: true
@@ -82,7 +82,7 @@ module.exports = {
       console.log('├─ Fetching ladder data...')
       const result = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME}!A2:I`
+        range: `${ladder.sheetName}!A2:I`
       })
 
       const rows = result.data.values
@@ -120,45 +120,45 @@ module.exports = {
       console.log(`│  └─ Effective jump size: ${availableJumpSize}`)
 
       // Special restriction for challenging top 10 players
-      if (targetRank <= TOP_10_THRESHOLD && challengerRank > TOP_10_THRESHOLD) {
-        if (availableJumpSize > TOP_10_MAX_JUMP) {
+      if (targetRank <= ladder.top10Threshold && challengerRank > ladder.top10Threshold) {
+        if (availableJumpSize > ladder.top10MaxJump) {
           console.log(
             '└─ Rejected: Non-top 10 player attempting to challenge top 10 beyond limit'
           )
-          const maxAllowedRank = challengerRank - TOP_10_MAX_JUMP
+          const maxAllowedRank = challengerRank - ladder.top10MaxJump
           return await interaction.editReply({
-            content: `Players outside top 10 can only challenge up to ${TOP_10_MAX_JUMP} ranks ahead when targeting top 10 players. The highest rank you can challenge is ${maxAllowedRank}.`
+            content: `Players outside top 10 can only challenge up to ${ladder.top10MaxJump} ranks ahead when targeting top 10 players. The highest rank you can challenge is ${maxAllowedRank}.`
           })
         }
-      } else if (challengerRank <= TOP_10_THRESHOLD) {
+      } else if (challengerRank <= ladder.top10Threshold) {
         // Top 10 restriction
-        if (availableJumpSize > TOP_10_MAX_JUMP) {
+        if (availableJumpSize > ladder.top10MaxJump) {
           console.log('└─ Rejected: Top 10 player exceeding max jump')
           const maxTarget = rows.find(
             row =>
-              parseInt(row[0]) === challengerRank - TOP_10_MAX_JUMP &&
+              parseInt(row[0]) === challengerRank - ladder.top10MaxJump &&
               row[5] !== 'Vacation'
           )
           return await interaction.editReply({
-            content: `Top 10 players can only challenge up to ${TOP_10_MAX_JUMP} ranks ahead. The highest rank you can challenge is ${
-              maxTarget ? maxTarget[0] : challengerRank - TOP_10_MAX_JUMP
+            content: `Top 10 players can only challenge up to ${ladder.top10MaxJump} ranks ahead. The highest rank you can challenge is ${
+              maxTarget ? maxTarget[0] : challengerRank - ladder.top10MaxJump
             }.`
           })
         }
       } else {
         // Regular player restriction
-        if (availableJumpSize > REGULAR_MAX_JUMP) {
+        if (availableJumpSize > ladder.regularMaxJump) {
           console.log('└─ Rejected: Regular player exceeding max jump')
           const maxTarget = rows.find(
             row =>
-              parseInt(row[0]) === challengerRank - REGULAR_MAX_JUMP &&
+              parseInt(row[0]) === challengerRank - ladder.regularMaxJump &&
               row[5] !== 'Vacation'
           )
           const skippedRanks = availablePlayersBetween
             .map(row => row[0])
             .join(', ')
           return await interaction.editReply({
-            content: `Players outside top 10 can only challenge up to ${REGULAR_MAX_JUMP} ranks ahead (excluding players on vacation). You're trying to skip ranks: ${skippedRanks}`
+            content: `Players outside top 10 can only challenge up to ${ladder.regularMaxJump} ranks ahead (excluding players on vacation). You're trying to skip ranks: ${skippedRanks}`
           })
         }
       }
@@ -201,7 +201,7 @@ module.exports = {
         element: targetRow[3]
       }
 
-      const cooldownCheck = await redisClient.checkCooldown(player1, player2)
+      const cooldownCheck = await redisClient.checkCooldown(player1, player2, ladder)
 
       if (cooldownCheck.onCooldown) {
         const remainingHours = Math.ceil(cooldownCheck.remainingTime / 3600)
@@ -241,13 +241,13 @@ module.exports = {
       const updatePromises = [
         sheets.spreadsheets.values.update({
           spreadsheetId: SPREADSHEET_ID,
-          range: `${SHEET_NAME}!F${challengerRowIndex}:H${challengerRowIndex}`,
+          range: `${ladder.sheetName}!F${challengerRowIndex}:H${challengerRowIndex}`,
           valueInputOption: 'USER_ENTERED',
           resource: { values: [['Challenge', challengeDate, targetRank]] }
         }),
         sheets.spreadsheets.values.update({
           spreadsheetId: SPREADSHEET_ID,
-          range: `${SHEET_NAME}!F${targetRowIndex}:H${targetRowIndex}`,
+          range: `${ladder.sheetName}!F${targetRowIndex}:H${targetRowIndex}`,
           valueInputOption: 'USER_ENTERED',
           resource: { values: [['Challenge', challengeDate, challengerRank]] }
         })
@@ -272,7 +272,7 @@ module.exports = {
       }
 
       // Set the challenge in Redis with the 3-day TTL
-      await redisClient.setChallenge(challenger, target, challengeDate)
+      await redisClient.setChallenge(challenger, target, challengeDate, ladder)
       console.log('├─ Challenge set in Redis with 3-day expiration')
 
       // Create and send announcement embed

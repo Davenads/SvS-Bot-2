@@ -7,6 +7,7 @@ const { google } = require('googleapis')
 const { logError } = require('../logger')
 const redisClient = require('../redis-client');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -15,7 +16,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
-const sheetId = 0 // Numeric sheetId for 'SvS Ladder' tab
 
 // Emoji and color mappings for visual enhancement
 const elementEmojis = {
@@ -69,7 +69,10 @@ module.exports = {
     ),
 
   async execute (interaction) {
-    if (interaction.channelId !== '1330563945341390959') {
+    // Resolve the ladder (default: main). Phase 2 will infer this from the
+    // channel; for now it is pinned to main (behavior-neutral).
+    const ladder = getLadderByKey('main')
+    if (interaction.channelId !== ladder.challengeChannelId) {
       return await interaction.reply({
         content: 'This command can only be used in the #challenges channel.',
         ephemeral: true
@@ -91,7 +94,7 @@ module.exports = {
       console.log('├─ Fetching data from Google Sheets...')
       const result = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `SvS Ladder!A2:K`
+        range: `${ladder.sheetName}!A2:K`
       })
 
       const rows = result.data.values
@@ -190,7 +193,7 @@ module.exports = {
         {
           updateCells: {
             range: {
-              sheetId: sheetId,
+              sheetId: ladder.sheetId,
               startRowIndex: winnerRowIndex - 1,
               endRowIndex: winnerRowIndex,
               startColumnIndex: 0,
@@ -211,7 +214,7 @@ module.exports = {
         {
           updateCells: {
             range: {
-              sheetId: sheetId,
+              sheetId: ladder.sheetId,
               startRowIndex: loserRowIndex - 1,
               endRowIndex: loserRowIndex,
               startColumnIndex: 0,
@@ -236,7 +239,7 @@ module.exports = {
         {
           updateCells: {
             range: {
-              sheetId: sheetId,
+              sheetId: ladder.sheetId,
               startRowIndex: winnerRowIndex - 1,
               endRowIndex: winnerRowIndex,
               startColumnIndex: 3,
@@ -259,7 +262,7 @@ module.exports = {
         {
           updateCells: {
             range: {
-              sheetId: sheetId,
+              sheetId: ladder.sheetId,
               startRowIndex: loserRowIndex - 1,
               endRowIndex: loserRowIndex,
               startColumnIndex: 3,
@@ -298,7 +301,7 @@ module.exports = {
           discordId: loserRow[8],
           element: loserRow[3]
         };
-        await redisClient.removeChallenge(winnerPlayer, loserPlayer);
+        await redisClient.removeChallenge(winnerPlayer, loserPlayer, ladder);
         console.log('├─ Removed challenge from Redis tracking');
       } catch (error) {
         console.error('Error removing challenge from Redis:', error);
@@ -326,7 +329,7 @@ module.exports = {
           // Fetch current metrics data
           const metricsResult = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Metrics!A11:C'
+            range: `${ladder.metricsTab}!A11:C`
           })
 
           const metricsRows = metricsResult.data.values || []
@@ -340,7 +343,7 @@ module.exports = {
             // New player - append to the list
             await sheets.spreadsheets.values.append({
               spreadsheetId: SPREADSHEET_ID,
-              range: 'Metrics!A11:C',
+              range: `${ladder.metricsTab}!A11:C`,
               valueInputOption: 'USER_ENTERED',
               resource: {
                 values: [
@@ -359,7 +362,7 @@ module.exports = {
               parseInt(metricsRows[playerRowIndex][2] || '0') + 1
             await sheets.spreadsheets.values.update({
               spreadsheetId: SPREADSHEET_ID,
-              range: `Metrics!A${11 + playerRowIndex}:C${11 + playerRowIndex}`,
+              range: `${ladder.metricsTab}!A${11 + playerRowIndex}:C${11 + playerRowIndex}`,
               valueInputOption: 'USER_ENTERED',
               resource: {
                 values: [
@@ -390,7 +393,7 @@ module.exports = {
 
       // Set cooldown in Redis
       try {
-        await redisClient.setCooldown(player1, player2)
+        await redisClient.setCooldown(player1, player2, ladder)
         console.log('Cooldown set successfully for match:', {
           winner: player1.discordId,
           loser: player2.discordId
