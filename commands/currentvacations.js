@@ -3,6 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { google } = require('googleapis');
 const { logError } = require('../logger'); // Import the logger
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 const sheets = google.sheets({
   version: 'v4',
@@ -10,7 +11,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_NAME = 'SvS Ladder';
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -19,10 +19,14 @@ module.exports = {
     
     async execute(interaction) {
         try {
+            // Resolve the ladder (default: main). Phase 2 will derive this from a
+            // `ladder` option; for now it is pinned to main (behavior-neutral).
+            const ladder = getLadderByKey('main');
+
             // Fetch all data from the sheet dynamically
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:H`, // Fetches all relevant columns starting from A2
+                range: `${ladder.sheetName}!A2:H`, // Fetches all relevant columns starting from A2
             });
 
             const rows = result.data.values;

@@ -3,6 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { logError } = require('../logger'); // Import the logger
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 const sheets = google.sheets({
   version: 'v4',
@@ -10,7 +11,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_NAME = 'SvS Ladder';
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -23,11 +23,15 @@ module.exports = {
             const user = interaction.user.tag;
             const timestamp = new Date().toISOString();
             console.log(`[${timestamp}] /currentchallenges command executed by ${user}`);
-            
+
+            // Resolve the ladder (default: main). Phase 2 will infer this from the
+            // channel; for now it is pinned to main (behavior-neutral).
+            const ladder = getLadderByKey('main');
+
             // Fetch all data from the sheet dynamically
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:H`, // Fetches all relevant columns starting from A2
+                range: `${ladder.sheetName}!A2:H`, // Fetches all relevant columns starting from A2
             });
 
             const rows = result.data.values;
