@@ -18,10 +18,10 @@ module.exports = {
         .setDescription('Display all players currently on vacation')
         .addStringOption(option =>
             option.setName('ladder')
-                .setDescription('Which ladder (defaults to SvS Standard)')
+                .setDescription('Which ladder (defaults to HLD)')
                 .setRequired(false)
                 .addChoices(
-                    { name: 'SvS (Standard)', value: 'main' },
+                    { name: 'HLD', value: 'main' },
                     { name: 'LLD', value: 'lld' }
                 )),
     
