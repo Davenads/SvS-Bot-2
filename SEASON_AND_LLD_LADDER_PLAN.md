@@ -497,7 +497,7 @@ automatically.
   `nullchallenges` / `currentchallenges` infer from channel and fall back to main
   outside a challenge channel (preserves prior any-channel behavior).
 - **Every other ladder-scoped command carries an optional `ladder` string
-  option** (`SvS (Standard)` = main / `LLD` = lld) resolved through
+  option** (`HLD` = main / `LLD` = lld) resolved through
   `getLadderFromOption(interaction)`; omitting it defaults to main, so existing
   invocations are unchanged. Applied to `register`, `remove`, `dodge`, `bench`,
   `insert`, `leaderboard`, `stats`, `titledefends`, `extendedvacations`,
