@@ -459,12 +459,24 @@ column so both ladders share the same tabs without collision.
 
 ## 7. Phased Delivery
 
-**Phase 0 — Ladder-aware foundation (behavior-neutral).**
+**Phase 0 — Ladder-aware foundation (behavior-neutral). — CODE COMPLETE (pending regression sign-off).**
 `config/ladders.js`, `utils/ladder.js`, refactor all hardcoded
 `SvS Ladder`/`sheetId 0` reads through config with default `main`, namespace
 Redis keys + migration, make the expiry handler/checker ladder-aware. Ship with
 only `main` wired → **no user-visible change**; regression-test the full main-
 ladder flow on the test guild.
+
+*Status:* every ladder-scoped command now resolves through
+`getLadderByKey('main')` — `register`, `challenge`, `reportwin`, `remove`,
+`dodge`, `bench`, `insert`, `cancelchallenge`, `extendchallenge`,
+`nullchallenges`, `shuffle`, `syncredis`, `leaderboard`, `extendedvacations`,
+`titledefends`, `stats`. Redis state/scan methods take a trailing `ladder` and
+namespace keys by `redisPrefix`; `shuffle`/`syncredis` scope their key scans so a
+`main` operation can never touch `lld` keys (legacy `migrateOldFormatKeys` stays
+global by design). Sheet/vacation/metrics tabs and numeric `sheetId` gids all
+read from config. Grep confirms zero remaining hardcoded ladder literals.
+Static `node -c` syntax checks pass across all commands + root files. Remaining
+gate: the live main-ladder regression run on `TEST_GUILD_ID` below.
 
 **Phase 1 — Season / #1 tracking for the main ladder (satisfies request 1).**
 Metrics `A11:D`, per-ladder title-defend key, `Seasons` / `Season Champions` /
