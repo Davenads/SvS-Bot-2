@@ -4,6 +4,7 @@ const { google } = require('googleapis');
 const { logError } = require('../logger');
 const redisClient = require('../redis-client');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 const sheets = google.sheets({
     version: 'v4',
@@ -11,7 +12,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_NAME = 'SvS Ladder';
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -30,6 +30,10 @@ module.exports = {
         console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        // Resolve the ladder (default: main). Phase 2 will read this from the
+        // channel/option; for now it is pinned to main (behavior-neutral).
+        const ladder = getLadderByKey('main');
 
         // Check for SvS Manager role
         const managerRole = interaction.guild.roles.cache.find(
@@ -70,7 +74,7 @@ module.exports = {
 
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:K`
+                range: `${ladder.sheetName}!A2:K`
             });
 
             let rows = result.data.values;
@@ -151,13 +155,13 @@ module.exports = {
             // Clear the entire range first
             await sheets.spreadsheets.values.clear({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:K${rows.length + 1}`
+                range: `${ladder.sheetName}!A2:K${rows.length + 1}`
             });
 
             // Write shuffled data
             await sheets.spreadsheets.values.update({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:K${rows.length + 1}`,
+                range: `${ladder.sheetName}!A2:K${rows.length + 1}`,
                 valueInputOption: 'USER_ENTERED',
                 resource: { values: rows }
             });
@@ -173,21 +177,24 @@ module.exports = {
             let challengeKeysProcessed = 0;
             let cooldownKeysProcessed = 0;
 
-            // Phase 5A: Clear all challenge Redis keys
-            console.log('├─ Clearing all Redis challenge keys...');
-            const challengeKeys = await redisClient.client.keys('challenge*');
-            if (challengeKeys.length > 0) {
-                await redisClient.client.del(...challengeKeys);
-                challengeKeysProcessed = challengeKeys.length;
-                console.log(`├─ Deleted ${challengeKeys.length} challenge keys`);
+            // Phase 5A: Clear this ladder's challenge Redis keys (challenge +
+            // warning), scoped by prefix so a main shuffle never wipes LLD keys.
+            console.log('├─ Clearing this ladder\'s Redis challenge keys...');
+            const challengeKeys = await redisClient.client.keys(`challenge:${ladder.redisPrefix}:*`);
+            const warningKeys = await redisClient.client.keys(`challenge-warning:${ladder.redisPrefix}:*`);
+            const allChallengeKeys = [...challengeKeys, ...warningKeys];
+            if (allChallengeKeys.length > 0) {
+                await redisClient.client.del(...allChallengeKeys);
+                challengeKeysProcessed = allChallengeKeys.length;
+                console.log(`├─ Deleted ${allChallengeKeys.length} challenge keys`);
             } else {
                 console.log('├─ No challenge keys found in Redis');
             }
 
-            // Phase 5C/5D: Handle cooldown Redis keys
+            // Phase 5C/5D: Handle cooldown Redis keys (scoped to this ladder)
             if (clearCooldowns) {
-                console.log('├─ Clearing all Redis cooldown keys...');
-                const cooldownKeys = await redisClient.client.keys('cooldown:*');
+                console.log('├─ Clearing this ladder\'s Redis cooldown keys...');
+                const cooldownKeys = await redisClient.client.keys(`cooldown:${ladder.redisPrefix}:*`);
                 if (cooldownKeys.length > 0) {
                     await redisClient.client.del(...cooldownKeys);
                     cooldownKeysProcessed = cooldownKeys.length;
@@ -195,7 +202,7 @@ module.exports = {
                 }
             } else {
                 console.log('├─ Verifying Redis cooldown keys...');
-                const cooldownKeys = await redisClient.client.keys('cooldown:*');
+                const cooldownKeys = await redisClient.client.keys(`cooldown:${ladder.redisPrefix}:*`);
                 const validDiscordIds = new Set(rows.map(row => row[8])); // Column I
 
                 for (const key of cooldownKeys) {
@@ -238,7 +245,7 @@ module.exports = {
 
             // Verify all challenges were cleared
             const remainingChallenges = rows.filter(row => row[5] === 'Challenge').length;
-            const remainingRedisChallenges = await redisClient.getAllChallenges();
+            const remainingRedisChallenges = await redisClient.getAllChallenges(ladder);
 
             if (remainingChallenges > 0) {
                 console.log(`├─ ⚠️ Warning: ${remainingChallenges} challenged players still in sheet`);

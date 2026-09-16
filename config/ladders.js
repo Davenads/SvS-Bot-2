@@ -19,6 +19,10 @@ const LADDERS = {
     sheetId: 0,
     challengeChannelId: '1330563945341390959',
     metricsTab: 'Metrics',
+    // Extended Vacation tab (bench/insert). Only the tab NAME is used today
+    // (values.get/update/clear by range string); no numeric gid is required
+    // because nothing formats this tab via batchUpdate.
+    vacationTab: 'Extended Vacation',
     // Namespace used for challenge / cooldown / warning Redis keys so the two
     // ladders never collide for the same player + element.
     redisPrefix: 'main',
@@ -35,6 +39,9 @@ const LADDERS = {
     sheetId: 1724011514,
     challengeChannelId: '1547283140995719258', // #lld-challenges
     metricsTab: 'LLD Metrics',
+    // LLD Extended Vacation tab (gid 612474986, confirmed by the mods).
+    vacationTab: 'LLD Extended Vacation',
+    vacationSheetId: 612474986,
     redisPrefix: 'lld',
     // Jump rules assumed identical to main until the mods confirm otherwise
     // (plan §10 #8). Change here if LLD uses different values.

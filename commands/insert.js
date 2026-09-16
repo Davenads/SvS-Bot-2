@@ -10,7 +10,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const VACATION_SHEET = 'Extended Vacation';
 
 const elementEmojis = {
   Fire: '🔥',
@@ -49,10 +48,14 @@ module.exports = {
   async autocomplete(interaction) {
     const focusedValue = interaction.options.getFocused().toLowerCase();
 
+    // Resolve the ladder (default: main). Autocomplete runs before the user can
+    // pick a ladder, so Phase 0 pins it to main (behavior-neutral).
+    const ladder = getLadderByKey('main');
+
     try {
       const result = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${VACATION_SHEET}!A2:E`
+        range: `${ladder.vacationTab}!A2:E`
       });
 
       const rows = result.data.values || [];
@@ -108,7 +111,7 @@ module.exports = {
         }),
         sheets.spreadsheets.values.get({
           spreadsheetId: SPREADSHEET_ID,
-          range: `${VACATION_SHEET}!A2:K`
+          range: `${ladder.vacationTab}!A2:K`
         })
       ]);
 
@@ -175,7 +178,7 @@ module.exports = {
         ) + 2;
       await sheets.spreadsheets.values.clear({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${VACATION_SHEET}!A${vacationRowIndex}:K${vacationRowIndex}`
+        range: `${ladder.vacationTab}!A${vacationRowIndex}:K${vacationRowIndex}`
       });
 
       const welcomeEmbed = new EmbedBuilder()

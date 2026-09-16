@@ -4,6 +4,7 @@ const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { logError } = require('../logger');
 const redisClient = require('../redis-client');
+const { getLadderByKey } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -12,7 +13,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const SHEET_NAME = 'SvS Ladder';
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -75,6 +75,10 @@ module.exports = {
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+        // Resolve the ladder (default: main). Phase 2 will read this from the
+        // channel/option; for now it is pinned to main (behavior-neutral).
+        const ladder = getLadderByKey('main');
+
         // Send immediate status update
         await interaction.editReply({ content: '🔄 Starting Redis sync operation...' });
 
@@ -93,7 +97,7 @@ module.exports = {
             // Fetch data from Google Sheets
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME}!A2:K`
+                range: `${ladder.sheetName}!A2:K`
             });
 
             const rows = result.data.values || [];
@@ -116,21 +120,21 @@ module.exports = {
                 console.log('├─ Processing standalone TTL recalculation...');
                 await interaction.editReply({ content: '🔄 Recalculating challenge expiration times...' });
 
-                ttlResults = await this.recalculateAllChallengeTTLs(rows, dryRun);
+                ttlResults = await this.recalculateAllChallengeTTLs(rows, dryRun, ladder);
                 console.log(`├─ TTL recalculation complete: ${ttlResults.length} challenges processed`);
             }
 
             // Handle cooldown operations first
             if (showCooldowns || clearCooldowns) {
                 console.log('├─ Processing cooldown operations...');
-                const allCooldowns = await redisClient.listAllCooldowns();
-                
+                const allCooldowns = await redisClient.listAllCooldowns(ladder);
+
                 if (clearCooldowns && !dryRun) {
                     console.log(`├─ Clearing ${allCooldowns.length} cooldowns...`);
                     // Clear each cooldown individually since SvS doesn't have a bulk clear method
                     let clearedCount = 0;
                     for (const cooldown of allCooldowns) {
-                        const success = await redisClient.removeCooldown(cooldown.player1, cooldown.player2);
+                        const success = await redisClient.removeCooldown(cooldown.player1, cooldown.player2, ladder);
                         if (success) clearedCount++;
                     }
                     console.log(`├─ Successfully cleared ${clearedCount} cooldown entries`);
@@ -252,7 +256,7 @@ module.exports = {
 
             for (const pair of challengePairs) {
                 // Check if challenge already exists in Redis
-                const existingChallenge = await redisClient.checkChallenge(pair.player1, pair.player2);
+                const existingChallenge = await redisClient.checkChallenge(pair.player1, pair.player2, ladder);
 
                 if (existingChallenge.active && !force) {
                     console.log(`├─ SKIP: Challenge ${pair.player1.rank} vs ${pair.player2.rank} already exists in Redis`);
@@ -287,7 +291,7 @@ module.exports = {
                     console.log(`├─ SYNC: Creating Redis entries for ${pair.player1.rank} vs ${pair.player2.rank}`);
 
                     // Set challenge in Redis
-                    await redisClient.setChallenge(pair.player1, pair.player2, pair.challengeDate || '');
+                    await redisClient.setChallenge(pair.player1, pair.player2, pair.challengeDate || '', ladder);
                     
                     syncedCount++;
                     syncResults.push({
@@ -364,11 +368,11 @@ module.exports = {
 
             // Verification info
             if (!dryRun) {
-                const allChallenges = await redisClient.getAllChallenges();
-                const allCooldowns = await redisClient.listAllCooldowns();
-                
+                const allChallenges = await redisClient.getAllChallenges(ladder);
+                const allCooldowns = await redisClient.listAllCooldowns(ladder);
+
                 // Get fresh cooldown count after potential clearing
-                const finalCooldowns = clearCooldowns ? await redisClient.listAllCooldowns() : allCooldowns;
+                const finalCooldowns = clearCooldowns ? await redisClient.listAllCooldowns(ladder) : allCooldowns;
                 
                 let verificationText = `• Total challenges in Redis: **${allChallenges.length}**\n• Total cooldowns in Redis: **${finalCooldowns.length}**`;
                 
@@ -605,11 +609,11 @@ module.exports = {
     },
 
     // Helper method to recalculate TTLs for all challenges without fixing keys
-    async recalculateAllChallengeTTLs(sheetRows, dryRun = false) {
+    async recalculateAllChallengeTTLs(sheetRows, dryRun = false, ladder = getLadderByKey('main')) {
         const results = [];
 
         try {
-            const allChallenges = await redisClient.getAllChallenges();
+            const allChallenges = await redisClient.getAllChallenges(ladder);
             console.log(`├─ Found ${allChallenges.length} existing challenges in Redis`);
 
             // Build rank to player data map

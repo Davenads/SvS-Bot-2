@@ -12,7 +12,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
-const VACATION_SHEET = 'Extended Vacation'
 
 // Emoji mappings
 const elementEmojis = {
@@ -81,7 +80,7 @@ module.exports = {
         }),
         sheets.spreadsheets.values.get({
           spreadsheetId: SPREADSHEET_ID,
-          range: `${VACATION_SHEET}!A2:K`
+          range: `${ladder.vacationTab}!A2:K`
         })
       ])
 
@@ -136,7 +135,7 @@ module.exports = {
       // 1. Add row to Extended Vacation tab
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${VACATION_SHEET}!A${emptyRowIndex}:K${emptyRowIndex}`,
+        range: `${ladder.vacationTab}!A${emptyRowIndex}:K${emptyRowIndex}`,
         valueInputOption: 'USER_ENTERED',
         resource: {
           values: [playerData]
