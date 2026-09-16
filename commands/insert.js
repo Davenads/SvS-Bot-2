@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 const sheets = google.sheets({
   version: 'v4',
@@ -9,9 +10,7 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const MAIN_SHEET = 'SvS Ladder';
 const VACATION_SHEET = 'Extended Vacation';
-const sheetId = 0;
 
 const elementEmojis = {
   Fire: '🔥',
@@ -83,6 +82,10 @@ module.exports = {
 
     await interaction.deferReply({ ephemeral: true });
 
+    // Resolve the ladder (default: main). Phase 2 will read this from the
+    // optional `ladder` option; for now it is pinned to main.
+    const ladder = getLadderByKey('main');
+
     const managerRole = interaction.guild.roles.cache.find(
       role => role.name === 'SvS Manager'
     );
@@ -100,7 +103,7 @@ module.exports = {
       const [mainSheetData, vacationSheetData] = await Promise.all([
         sheets.spreadsheets.values.get({
           spreadsheetId: SPREADSHEET_ID,
-          range: `${MAIN_SHEET}!A2:K`,
+          range: `${ladder.sheetName}!A2:K`,
           valueRenderOption: 'UNFORMATTED_VALUE'
         }),
         sheets.spreadsheets.values.get({
@@ -161,7 +164,7 @@ module.exports = {
 
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${MAIN_SHEET}!A2:K`,
+        range: `${ladder.sheetName}!A2:K`,
         valueInputOption: 'USER_ENTERED',
         resource: { values: updateRows }
       });

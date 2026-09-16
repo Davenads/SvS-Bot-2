@@ -3,6 +3,7 @@ const { google } = require('googleapis')
 const { logError } = require('../logger')
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const redisClient = require('../redis-client');
+const { getLadderByKey } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -11,8 +12,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
-const MAIN_SHEET = 'SvS Ladder'
-const sheetId = 0 // SvS Ladder tab
 
 // Emoji mappings
 const elementEmojis = {
@@ -54,6 +53,10 @@ module.exports = {
 
     await interaction.deferReply({ ephemeral: true })
 
+    // Resolve the ladder (default: main). Phase 2 will read this from the
+    // optional `ladder` option; for now it is pinned to main.
+    const ladder = getLadderByKey('main')
+
     // Check if the user has the '@SvS Manager' role
     const managerRole = interaction.guild.roles.cache.find(
       role => role.name === 'SvS Manager'
@@ -72,7 +75,7 @@ module.exports = {
       // Fetch data from main sheet
       const mainResult = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${MAIN_SHEET}!A2:K`
+        range: `${ladder.sheetName}!A2:K`
       })
 
       const rows = mainResult.data.values
@@ -135,7 +138,7 @@ module.exports = {
             requests.push({
               updateCells: {
                 range: {
-                  sheetId: sheetId,
+                  sheetId: ladder.sheetId,
                   startRowIndex: i + 1,
                   endRowIndex: i + 2,
                   startColumnIndex: 7,
@@ -174,7 +177,7 @@ module.exports = {
           try {
             const player1 = { discordId: playerData[8], element: playerData[3] };
             const player2 = { discordId: rows[opponentIndex][8], element: rows[opponentIndex][3] };
-            await redisClient.removeChallenge(player1, player2);
+            await redisClient.removeChallenge(player1, player2, ladder);
             console.log('├─ Challenge removed from Redis');
           } catch (error) {
             console.error('├─ Error removing challenge from Redis:', error);
@@ -183,7 +186,7 @@ module.exports = {
           requests.push({
             updateCells: {
               range: {
-                sheetId: sheetId,
+                sheetId: ladder.sheetId,
                 startRowIndex: opponentIndex + 1,
                 endRowIndex: opponentIndex + 2,
                 startColumnIndex: 5,
@@ -211,7 +214,7 @@ module.exports = {
       requests.push({
         deleteDimension: {
           range: {
-            sheetId: sheetId,
+            sheetId: ladder.sheetId,
             dimension: 'ROWS',
             startIndex: rowIndex + 1,
             endIndex: rowIndex + 2
@@ -233,7 +236,7 @@ module.exports = {
         requests.push({
           updateCells: {
             range: {
-              sheetId: sheetId,
+              sheetId: ladder.sheetId,
               startRowIndex: i,
               endRowIndex: i + 1,
               startColumnIndex: 0,
@@ -264,7 +267,7 @@ module.exports = {
             requests.push({
               updateCells: {
                 range: {
-                  sheetId: sheetId,
+                  sheetId: ladder.sheetId,
                   startRowIndex: i,
                   endRowIndex: i + 1,
                   startColumnIndex: 7,
@@ -292,7 +295,7 @@ module.exports = {
             requests.push({
               updateCells: {
                 range: {
-                  sheetId: sheetId,
+                  sheetId: ladder.sheetId,
                   startRowIndex: i,
                   endRowIndex: i + 1,
                   startColumnIndex: 5,
@@ -330,7 +333,7 @@ module.exports = {
       // Verify ranks
       const verificationResult = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `${MAIN_SHEET}!A2:A`
+        range: `${ladder.sheetName}!A2:A`
       })
 
       const updatedRanks = verificationResult.data.values

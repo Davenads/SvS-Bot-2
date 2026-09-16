@@ -5,6 +5,7 @@ require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -13,7 +14,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
 
 // Define emoji icons for Spec and Element
 const specEmojis = {
@@ -90,6 +90,10 @@ module.exports = {
     async execute(interaction) {
         await interaction.deferReply(); // Defer the reply to prevent timeout issues
 
+        // Resolve the ladder (default: main). Phase 2 will read this from the
+        // optional `ladder` option; for now it is pinned to main.
+        const ladder = getLadderByKey('main');
+
         // Check if the user has the '@SvS Manager' role
         const managerRole = interaction.guild.roles.cache.find(role => role.name === 'SvS Manager');
         if (!managerRole || !interaction.member.roles.cache.has(managerRole.id)) {
@@ -115,7 +119,7 @@ module.exports = {
             // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:K`, // Fetch columns A to K
+                range: `${ladder.sheetName}!A2:K`, // Fetch columns A to K
             });
 
             const rows = result.data.values;
@@ -148,14 +152,14 @@ module.exports = {
                 {
                     copyPaste: {
                         source: {
-                            sheetId: sheetId,
+                            sheetId: ladder.sheetId,
                             startRowIndex: copyRowIndex,
                             endRowIndex: copyRowIndex + 1,
                             startColumnIndex: 2,
                             endColumnIndex: 6
                         },
                         destination: {
-                            sheetId: sheetId,
+                            sheetId: ladder.sheetId,
                             startRowIndex: emptyRowIndex - 1,
                             endRowIndex: emptyRowIndex,
                             startColumnIndex: 2,
@@ -167,14 +171,14 @@ module.exports = {
                 {
                     copyPaste: {
                         source: {
-                            sheetId: sheetId,
+                            sheetId: ladder.sheetId,
                             startRowIndex: copyRowIndex,
                             endRowIndex: copyRowIndex + 1,
                             startColumnIndex: 5,
                             endColumnIndex: 6
                         },
                         destination: {
-                            sheetId: sheetId,
+                            sheetId: ladder.sheetId,
                             startRowIndex: emptyRowIndex - 1,
                             endRowIndex: emptyRowIndex,
                             startColumnIndex: 5,
@@ -186,7 +190,7 @@ module.exports = {
                 {
                     updateCells: {
                         range: {
-                            sheetId: sheetId,
+                            sheetId: ladder.sheetId,
                             startRowIndex: emptyRowIndex - 1,
                             endRowIndex: emptyRowIndex,
                             startColumnIndex: 3, // Element column (D)
@@ -207,7 +211,7 @@ module.exports = {
                 {
                     updateCells: {
                         range: {
-                            sheetId: sheetId,
+                            sheetId: ladder.sheetId,
                             startRowIndex: emptyRowIndex - 1,
                             endRowIndex: emptyRowIndex,
                             startColumnIndex: 1, // Name column (B)
@@ -236,7 +240,7 @@ module.exports = {
             // Update the Google Sheet with the new row at the correct position
             await sheets.spreadsheets.values.update({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A${emptyRowIndex}:K`,
+                range: `${ladder.sheetName}!A${emptyRowIndex}:K`,
                 valueInputOption: 'RAW',
                 resource: {
                     values: [newCharacterRow]
@@ -246,7 +250,7 @@ module.exports = {
             // Ensure the Status column (Column F) is set to 'Available' after copying data validation
             await sheets.spreadsheets.values.update({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!F${emptyRowIndex}`,
+                range: `${ladder.sheetName}!F${emptyRowIndex}`,
                 valueInputOption: 'RAW',
                 resource: {
                     values: [['Available']]

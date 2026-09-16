@@ -6,6 +6,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const { getLadderByKey } = require('../utils/ladder');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -14,7 +15,6 @@ const sheets = google.sheets({
 });
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const sheetId = 0; // Numeric sheetId for 'SvS Ladder' tab
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -36,6 +36,11 @@ module.exports = {
         }
 
         await interaction.deferReply({ ephemeral: true });
+
+        // Resolve the ladder (default: main). Phase 2 will read this from the
+        // optional `ladder` option; for now it is pinned to main.
+        const ladder = getLadderByKey('main');
+
         const timestamp = new Date().toISOString();
         console.log(`\n[${timestamp}] Dodge Command`);
         console.log(`├─ Invoked by: ${interaction.user.tag} (${interaction.user.id})`);
@@ -50,7 +55,7 @@ module.exports = {
             console.log('├─ Fetching data from Google Sheets...');
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!A2:K`
+                range: `${ladder.sheetName}!A2:K`
             });
 
             const rows = result.data.values;
@@ -89,7 +94,7 @@ module.exports = {
             console.log(`├─ Updating dodge count for ${playerName} (Rank ${playerRank}) from ${currentDodges} to ${dodgeCount}`);
             await sheets.spreadsheets.values.update({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `SvS Ladder!K${playerRowIndex + 2}`,  // +2 because row index starts at 0 and sheet has header
+                range: `${ladder.sheetName}!K${playerRowIndex + 2}`,  // +2 because row index starts at 0 and sheet has header
                 valueInputOption: 'RAW',
                 resource: {
                     values: [[dodgeCount.toString()]]
