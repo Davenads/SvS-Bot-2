@@ -478,11 +478,32 @@ read from config. Grep confirms zero remaining hardcoded ladder literals.
 Static `node -c` syntax checks pass across all commands + root files. Remaining
 gate: the live main-ladder regression run on `TEST_GUILD_ID` below.
 
-**Phase 1 — Season / #1 tracking for the main ladder (satisfies request 1).**
+**Phase 1 — Season / #1 tracking for the main ladder (satisfies request 1). — FOUNDATION SHIPPED; SHEET PREREQS PENDING.**
 Metrics `A11:D`, per-ladder title-defend key, `Seasons` / `Season Champions` /
 `Season Defends Archive` tabs, `/newseason`, `/seasonhistory`, updated
 `/titledefends` + `/stats` + `/titledefendmode`. Backfill migration. This is the
 **time-sensitive** piece for the 9/1 reset — can ship independently of LLD.
+
+*Status — foundation (behavior-neutral) is live:*
+- `config/ladders.js` exports shared `SEASON_CHAMPIONS_TAB` / `SEASONS_TAB`.
+- `redis-client.js` gained a **per-ladder season pointer** (`getSeason` /
+  `setSeason` / `get|setSeasonStartDate`, key `svs:season:{prefix}:current`) and
+  **per-ladder title-defend mode** (`svs:titledefends:{prefix}:enabled`) that
+  migrates the legacy global key into `main` on first read.
+- `/titledefendmode` gained a `ladder` option (on each subcommand) and now reads/
+  writes the per-ladder flag; `reportwin` passes its resolved ladder to
+  `getTitleDefendMode(ladder)`. Column-C writes are unchanged, so live behavior is
+  identical until the all-time (D) work below lands.
+
+*Blocked on sheet prerequisites before the remaining code (all-time column D,
+`/newseason`, `/seasonhistory`, `/titledefends scope`, `/stats` season view):*
+1. **`Metrics` and `LLD Metrics`:** add **column D = all-time defends** to the
+   `A11` title-defends table and **backfill D = current C** for every existing
+   row (otherwise the first post-upgrade defense would reset all-time to the
+   season count).
+2. **`Seasons` tab** (shared): headers `Season | Ladder | Start Date | End Date`.
+3. **`Season Champions` tab** (shared, mod already created): confirm headers match
+   the exact A→K order in §3.2-B.
 
 **Phase 2 — Activate the LLD ladder (satisfies request 2). — COMMAND ROUTING LIVE.**
 Add `ladder` option to all commands, wire LLD `sheetId`/channel/`LLD Metrics`,
