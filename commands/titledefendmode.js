@@ -1,26 +1,40 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const redisClient = require('../redis-client');
 const { logError } = require('../logger');
+const { getLadderFromOption } = require('../utils/ladder');
 
 const MANAGER_ROLE = 'SvS Manager';
+
+// Slash commands can't mix a top-level option with subcommands, so the optional
+// `ladder` selector is attached to each subcommand (default: HLD / main).
+const withLadderOption = sub =>
+    sub.addStringOption(option =>
+        option.setName('ladder')
+            .setDescription('Which ladder (defaults to HLD)')
+            .setRequired(false)
+            .addChoices(
+                { name: 'HLD', value: 'main' },
+                { name: 'LLD', value: 'lld' }
+            ));
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('titledefendmode')
         .setDescription('Toggle or check title defend tracking')
         .addSubcommand(sub =>
-            sub.setName('on').setDescription('Enable title defend tracking')
+            withLadderOption(sub.setName('on').setDescription('Enable title defend tracking'))
         )
         .addSubcommand(sub =>
-            sub.setName('off').setDescription('Disable title defend tracking')
+            withLadderOption(sub.setName('off').setDescription('Disable title defend tracking'))
         )
         .addSubcommand(sub =>
-            sub.setName('status').setDescription('Check current title defend tracking state')
+            withLadderOption(sub.setName('status').setDescription('Check current title defend tracking state'))
         ),
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
-        console.log(`\n[${new Date().toISOString()}] Command invoked: /titledefendmode ${sub} by ${interaction.user.tag}`);
+        const ladder = getLadderFromOption(interaction);
+        console.log(`\n[${new Date().toISOString()}] Command invoked: /titledefendmode ${sub} (${ladder.key}) by ${interaction.user.tag}`);
 
         // on/off requires manager role
         if (sub !== 'status') {
@@ -38,11 +52,11 @@ module.exports = {
         try {
             if (sub === 'on' || sub === 'off') {
                 const enabling = sub === 'on';
-                await redisClient.setTitleDefendMode(enabling);
+                await redisClient.setTitleDefendMode(enabling, ladder);
 
                 const embed = new EmbedBuilder()
                     .setColor(enabling ? 0x57F287 : 0xED4245)
-                    .setTitle('Title Defend Tracking Updated')
+                    .setTitle(`Title Defend Tracking Updated — ${ladder.displayName}`)
                     .setDescription(
                         enabling
                             ? '✅ Title defend tracking is now **enabled**.\nRank 1 wins will be recorded in the Metrics sheet.'
@@ -51,16 +65,16 @@ module.exports = {
                     .setFooter({ text: `Changed by ${interaction.user.tag}` })
                     .setTimestamp();
 
-                console.log(`└─ Title defend mode set to: ${sub}`);
+                console.log(`└─ Title defend mode set to: ${sub} (${ladder.key})`);
                 return interaction.editReply({ embeds: [embed] });
             }
 
             if (sub === 'status') {
-                const enabled = await redisClient.getTitleDefendMode();
+                const enabled = await redisClient.getTitleDefendMode(ladder);
 
                 const embed = new EmbedBuilder()
                     .setColor(enabled ? 0x57F287 : 0xED4245)
-                    .setTitle('Title Defend Tracking Status')
+                    .setTitle(`Title Defend Tracking Status — ${ladder.displayName}`)
                     .setDescription(
                         enabled
                             ? '✅ Title defend tracking is currently **enabled**.'
@@ -68,7 +82,7 @@ module.exports = {
                     )
                     .setTimestamp();
 
-                console.log(`└─ Title defend mode status checked: ${enabled ? 'enabled' : 'disabled'}`);
+                console.log(`└─ Title defend mode status checked: ${enabled ? 'enabled' : 'disabled'} (${ladder.key})`);
                 return interaction.editReply({ embeds: [embed] });
             }
         } catch (error) {

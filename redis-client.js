@@ -522,11 +522,24 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    // Title defend mode toggle
-    // Key: svs:titledefends:enabled — value: 'true' | 'false' (no TTL, persistent)
-    async getTitleDefendMode() {
+    // Title defend mode toggle — now namespaced per ladder.
+    // Key: svs:titledefends:{prefix}:enabled — value: 'true' | 'false' (persistent).
+    // Legacy global key svs:titledefends:enabled is migrated into main on first read.
+    async getTitleDefendMode(ladder) {
+        const prefix = ladderPrefix(ladder);
+        const key = `svs:titledefends:${prefix}:enabled`;
         try {
-            const value = await this.client.get('svs:titledefends:enabled');
+            let value = await this.client.get(key);
+            // One-time migration: seed the main per-ladder key from the pre-Phase-1
+            // global key so an existing on/off choice carries over. LLD has no legacy
+            // key and simply defaults to enabled.
+            if (value === null && prefix === LADDERS[DEFAULT_LADDER_KEY].redisPrefix) {
+                const legacy = await this.client.get('svs:titledefends:enabled');
+                if (legacy !== null) {
+                    await this.client.set(key, legacy);
+                    value = legacy;
+                }
+            }
             // Default to enabled if key hasn't been set yet
             return value === null ? true : value === 'true';
         } catch (error) {
@@ -536,12 +549,62 @@ class RedisClient extends EventEmitter {
         }
     }
 
-    async setTitleDefendMode(enabled) {
+    async setTitleDefendMode(enabled, ladder) {
+        const prefix = ladderPrefix(ladder);
         try {
-            await this.client.set('svs:titledefends:enabled', enabled ? 'true' : 'false');
+            await this.client.set(`svs:titledefends:${prefix}:enabled`, enabled ? 'true' : 'false');
         } catch (error) {
             console.error('Error setting title defend mode:', error);
             logError('Error setting title defend mode', error);
+            throw error;
+        }
+    }
+
+    // Season pointer (per ladder). The Seasons / Season Champions sheet tabs are
+    // the durable source of truth; Redis caches the current season number for
+    // fast reads. Key: svs:season:{prefix}:current — integer stored as a string.
+    // Returns null when unset so callers can initialize from the sheet.
+    async getSeason(ladder) {
+        const prefix = ladderPrefix(ladder);
+        try {
+            const value = await this.client.get(`svs:season:${prefix}:current`);
+            return value === null ? null : parseInt(value, 10);
+        } catch (error) {
+            console.error('Error getting season pointer:', error);
+            logError('Error getting season pointer', error);
+            return null;
+        }
+    }
+
+    async setSeason(seasonNumber, ladder) {
+        const prefix = ladderPrefix(ladder);
+        try {
+            await this.client.set(`svs:season:${prefix}:current`, String(seasonNumber));
+        } catch (error) {
+            console.error('Error setting season pointer:', error);
+            logError('Error setting season pointer', error);
+            throw error;
+        }
+    }
+
+    async getSeasonStartDate(ladder) {
+        const prefix = ladderPrefix(ladder);
+        try {
+            return await this.client.get(`svs:season:${prefix}:startDate`);
+        } catch (error) {
+            console.error('Error getting season start date:', error);
+            logError('Error getting season start date', error);
+            return null;
+        }
+    }
+
+    async setSeasonStartDate(dateIso, ladder) {
+        const prefix = ladderPrefix(ladder);
+        try {
+            await this.client.set(`svs:season:${prefix}:startDate`, dateIso);
+        } catch (error) {
+            console.error('Error setting season start date:', error);
+            logError('Error setting season start date', error);
             throw error;
         }
     }

@@ -55,10 +55,25 @@ const LADDERS = {
 // with every command people type today).
 const DEFAULT_LADDER_KEY = 'main';
 
+// Season tabs are SHARED across both ladders — a `Ladder` column (values
+// `Standard` / `LLD`, matching each ladder's seasonLabel) disambiguates the rows.
+// See SEASON_AND_LLD_LADDER_PLAN.md §3.2. The bot appends to Season Champions by
+// column position A→K, so the header order in the sheet must not be reordered.
+const SEASON_CHAMPIONS_TAB = 'Season Champions';
+// Durable mirror of the per-ladder season pointer (Season, Ladder, Start Date,
+// End Date). Redis caches the current number; this tab is the source of truth.
+const SEASONS_TAB = 'Seasons';
+
 // Slash-command option choices for the `ladder` argument.
 const LADDER_CHOICES = [
   { name: 'Main (SvS)', value: 'main' },
   { name: 'LLD', value: 'lld' },
 ];
 
-module.exports = { LADDERS, DEFAULT_LADDER_KEY, LADDER_CHOICES };
+module.exports = {
+  LADDERS,
+  DEFAULT_LADDER_KEY,
+  LADDER_CHOICES,
+  SEASON_CHAMPIONS_TAB,
+  SEASONS_TAB,
+};
