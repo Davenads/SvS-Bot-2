@@ -42,6 +42,14 @@ module.exports = {
                 .addChoices(
                     { name: 'HLD', value: 'main' },
                     { name: 'LLD', value: 'lld' }
+                ))
+        .addStringOption(option =>
+            option.setName('scope')
+                .setDescription('Season (current) or all-time defends (defaults to season)')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'Season', value: 'season' },
+                    { name: 'All-Time', value: 'alltime' }
                 )),
 
     async execute(interaction) {
@@ -50,12 +58,15 @@ module.exports = {
 
         // Resolve the ladder from the optional `ladder` option (default: main).
         const ladder = getLadderFromOption(interaction);
+        // Scope: season reads column C (index 2), all-time reads column D (index 3).
+        const scope = interaction.options.getString('scope') || 'season';
+        const defendsIndex = scope === 'alltime' ? 3 : 2;
 
         try {
-            // Fetch title defends data from Metrics tab
+            // Fetch title defends data from Metrics tab (C = season, D = all-time).
             const result = await sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${ladder.metricsTab}!A11:C` // Title defends section
+                range: `${ladder.metricsTab}!A11:D` // Title defends section
             });
 
             if (!result.data.values) {
@@ -68,12 +79,13 @@ module.exports = {
             console.log('├─ Processing data from Metrics tab...');
             // Process and sort the data
             const titleDefends = result.data.values
-                .filter(row => row[0] && row[2]) // Filter out empty rows
+                .filter(row => row[0] && row[defendsIndex]) // Filter out empty rows
                 .map(row => ({
                     username: row[0],
                     discordId: row[1] ? row[1].trim() : '', // Handle empty or whitespace-only IDs
-                    defends: parseInt(row[2])
+                    defends: parseInt(row[defendsIndex])
                 }))
+                .filter(d => !Number.isNaN(d.defends) && d.defends > 0)
                 .sort((a, b) => b.defends - a.defends); // Sort by number of defends descending
 
             console.log(`├─ Found ${titleDefends.length} title defenders`);
@@ -109,8 +121,10 @@ module.exports = {
 
                 const embed = new EmbedBuilder()
                     .setColor(0xFFD700)
-                    .setTitle('🏰 Title Defense Leaderboard 🏰')
-                    .setDescription('Honoring our most successful title defenders!')
+                    .setTitle(`🏰 Title Defense Leaderboard — ${ladder.displayName} 🏰`)
+                    .setDescription(scope === 'alltime'
+                        ? 'All-time title defenders across every season!'
+                        : 'Honoring this season\'s most successful title defenders!')
                     .addFields({
                         name: '📊 Defense Records',
                         value: pageText || '*No title defenses recorded yet. Will you be the first?*'
@@ -128,8 +142,10 @@ module.exports = {
             if (pages.length === 0) {
                 const embed = new EmbedBuilder()
                     .setColor(0xFFD700)
-                    .setTitle('🏰 Title Defense Leaderboard 🏰')
-                    .setDescription('Honoring our most successful title defenders!')
+                    .setTitle(`🏰 Title Defense Leaderboard — ${ladder.displayName} 🏰`)
+                    .setDescription(scope === 'alltime'
+                        ? 'All-time title defenders across every season!'
+                        : 'Honoring this season\'s most successful title defenders!')
                     .addFields({
                         name: '📊 Defense Records',
                         value: '*No title defenses recorded yet. Will you be the first?*'

@@ -327,10 +327,10 @@ module.exports = {
         console.log('Processing title defense metrics...')
 
         try {
-          // Fetch current metrics data
+          // Fetch current metrics data (C = current-season defends, D = all-time)
           const metricsResult = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${ladder.metricsTab}!A11:C`
+            range: `${ladder.metricsTab}!A11:D`
           })
 
           const metricsRows = metricsResult.data.values || []
@@ -341,36 +341,40 @@ module.exports = {
           ) // Use winnerRow[8] directly for Discord ID
 
           if (playerRowIndex === -1) {
-            // New player - append to the list
+            // New player - append to the list (season + all-time both start at 1)
             await sheets.spreadsheets.values.append({
               spreadsheetId: SPREADSHEET_ID,
-              range: `${ladder.metricsTab}!A11:C`,
+              range: `${ladder.metricsTab}!A11:D`,
               valueInputOption: 'USER_ENTERED',
               resource: {
                 values: [
                   [
                     winnerRow[4], // Discord Username
                     winnerRow[8], // Discord ID
-                    '1'
+                    '1', // Current-season defends
+                    '1' // All-time defends
                   ]
                 ]
               }
             })
             console.log('New title defender added to metrics')
           } else {
-            // Existing player - update their count
-            const currentDefenses =
+            // Existing player - increment BOTH current-season (C) and all-time (D)
+            const seasonDefenses =
               parseInt(metricsRows[playerRowIndex][2] || '0') + 1
+            const allTimeDefenses =
+              parseInt(metricsRows[playerRowIndex][3] || '0') + 1
             await sheets.spreadsheets.values.update({
               spreadsheetId: SPREADSHEET_ID,
-              range: `${ladder.metricsTab}!A${11 + playerRowIndex}:C${11 + playerRowIndex}`,
+              range: `${ladder.metricsTab}!A${11 + playerRowIndex}:D${11 + playerRowIndex}`,
               valueInputOption: 'USER_ENTERED',
               resource: {
                 values: [
                   [
                     winnerRow[4], // Discord Username
                     winnerRow[8], // Discord ID
-                    currentDefenses.toString()
+                    seasonDefenses.toString(),
+                    allTimeDefenses.toString()
                   ]
                 ]
               }

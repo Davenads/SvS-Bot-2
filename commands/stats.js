@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
+const redisClient = require('../redis-client');
 const { getLadderFromOption } = require('../utils/ladder');
 
 const sheets = google.sheets({
@@ -47,16 +48,18 @@ module.exports = {
         try {
             console.log('├─ Fetching metrics and title defense data...');
             // Fetch both metrics and title defends data
-            const [metricsResult, titleDefendsResult] = await Promise.all([
+            const [metricsResult, titleDefendsResult, currentSeason] = await Promise.all([
                 sheets.spreadsheets.values.get({
                     spreadsheetId: SPREADSHEET_ID,
                     range: `${ladder.metricsTab}!A1:F8`
                 }),
                 sheets.spreadsheets.values.get({
                     spreadsheetId: SPREADSHEET_ID,
-                    range: `${ladder.metricsTab}!A11:C` // Title defends section
-                })
+                    range: `${ladder.metricsTab}!A11:D` // Title defends section (C=season, D=all-time)
+                }),
+                redisClient.getSeason(ladder)
             ]);
+            const seasonLabel = currentSeason != null ? `Season ${currentSeason}` : 'Current Season';
 
             if (!metricsResult.data.values) {
                 return await interaction.editReply({
@@ -83,23 +86,25 @@ module.exports = {
                     return acc;
                 }, {});
 
-            // Parse and sort title defends
-            const titleDefends = titleDefendsResult.data.values
-                .filter(row => row[0] && row[2]) // Filter out empty rows
+            // Parse and sort title defends (C = current season, D = all-time)
+            const titleDefends = (titleDefendsResult.data.values || [])
+                .filter(row => row[0]) // Filter out empty rows
                 .map(row => ({
                     username: row[0],
-                    defends: parseInt(row[2])
+                    defends: parseInt(row[2] || '0'),
+                    allTime: parseInt(row[3] || '0')
                 }))
-                .sort((a, b) => b.defends - a.defends); // Sort by number of defends
+                .filter(d => d.defends > 0 || d.allTime > 0)
+                .sort((a, b) => b.defends - a.defends || b.allTime - a.allTime); // Sort by season, then all-time
 
             // Create element distribution string
             const elementDistribution = elementData
                 .map(elem => `${elementEmojis[elem.element]} ${elem.element}: ${elem.count} (${elem.percentage})`)
                 .join('\n');
 
-            // Create title defends string
+            // Create title defends string (season defends + all-time in parentheses)
             const titleDefendsString = titleDefends
-                .map((defender, index) => `${index + 1}. ${defender.username}: ${defender.defends} defends`)
+                .map((defender, index) => `${index + 1}. ${defender.username}: ${defender.defends} this season (${defender.allTime} all-time)`)
                 .join('\n');
 
             // Create embeds array for pagination
@@ -108,7 +113,7 @@ module.exports = {
             // First page: Stats and Element Distribution
             const statsEmbed = new EmbedBuilder()
                 .setColor(0x00AE86)
-                .setTitle('📊 SvS Ladder Statistics')
+                .setTitle(`📊 ${ladder.displayName} Statistics — ${seasonLabel}`)
                 .addFields(
                     {
                         name: '🎭 Player Stats',
@@ -134,7 +139,7 @@ module.exports = {
             // Second page: Title Defends
             const titleDefendsEmbed = new EmbedBuilder()
                 .setColor(0x00AE86)
-                .setTitle('👑 Title Defense Leaderboard')
+                .setTitle(`👑 Title Defense Leaderboard — ${seasonLabel}`)
                 .setDescription(titleDefendsString || 'No title defenses recorded yet.')
                 .setFooter({ 
                     text: 'Page 2/2 - Title Defenses',

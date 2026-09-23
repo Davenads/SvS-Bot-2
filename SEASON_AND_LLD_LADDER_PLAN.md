@@ -478,7 +478,7 @@ read from config. Grep confirms zero remaining hardcoded ladder literals.
 Static `node -c` syntax checks pass across all commands + root files. Remaining
 gate: the live main-ladder regression run on `TEST_GUILD_ID` below.
 
-**Phase 1 — Season / #1 tracking for the main ladder (satisfies request 1). — FOUNDATION SHIPPED; SHEET PREREQS PENDING.**
+**Phase 1 — Season / #1 tracking for the main ladder (satisfies request 1). — SHIPPED (deployed to both guilds).**
 Metrics `A11:D`, per-ladder title-defend key, `Seasons` / `Season Champions` /
 `Season Defends Archive` tabs, `/newseason`, `/seasonhistory`, updated
 `/titledefends` + `/stats` + `/titledefendmode`. Backfill migration. This is the
@@ -492,18 +492,29 @@ Metrics `A11:D`, per-ladder title-defend key, `Seasons` / `Season Champions` /
   migrates the legacy global key into `main` on first read.
 - `/titledefendmode` gained a `ladder` option (on each subcommand) and now reads/
   writes the per-ladder flag; `reportwin` passes its resolved ladder to
-  `getTitleDefendMode(ladder)`. Column-C writes are unchanged, so live behavior is
-  identical until the all-time (D) work below lands.
+  `getTitleDefendMode(ladder)`.
 
-*Blocked on sheet prerequisites before the remaining code (all-time column D,
-`/newseason`, `/seasonhistory`, `/titledefends scope`, `/stats` season view):*
-1. **`Metrics` and `LLD Metrics`:** add **column D = all-time defends** to the
-   `A11` title-defends table and **backfill D = current C** for every existing
-   row (otherwise the first post-upgrade defense would reset all-time to the
-   season count).
-2. **`Seasons` tab** (shared): headers `Season | Ladder | Start Date | End Date`.
-3. **`Season Champions` tab** (shared, mod already created): confirm headers match
-   the exact A→K order in §3.2-B.
+*Status — season code (all-time D + season commands) is live:*
+- **Sheet prereqs confirmed complete** by the mods: `Metrics`/`LLD Metrics`
+  column D added + backfilled `D = C`; `Seasons` tab created
+  (`Season | Ladder | Start Date | End Date`); `Season Champions` A→K confirmed.
+- `reportwin` now reads/writes `${metricsTab}!A11:D` and increments **both**
+  column C (current-season) and column D (all-time) on a rank-1 defense; new
+  defenders are appended with `C = D = 1`.
+- **`/newseason`** (Manager-only, `ladder` option, `force` flag): resolves the
+  ending season `N` (Redis pointer, else `(max Season in Season Champions for
+  ladder) + 1`); **idempotency guard** — a duplicate `(N, ladder)` row triggers a
+  confirm/cancel button before appending; reads the live rank-#1 (champion) +
+  rank-#2 (runner-up) and the champion's season defends from Metrics C; appends
+  the champion row A→K to `Season Champions`; **zeros column C only** (D
+  untouched); advances the pointer to `N+1` in Redis and mirrors to the `Seasons`
+  tab; posts an announcement embed. **Decoupled** from any rank wipe.
+- **`/seasonhistory`** — paginated past champions from `Season Champions`, newest
+  first, optional `ladder` filter (shows a `[ladder]` tag when unfiltered).
+- **`/titledefends`** gained `scope: season | alltime` (default season → column C,
+  all-time → column D) and now shows the ladder name in the title.
+- **`/stats`** shows the current `Season N` label and lists each defender's
+  season defends **and** all-time total.
 
 **Phase 2 — Activate the LLD ladder (satisfies request 2). — COMMAND ROUTING LIVE.**
 Add `ladder` option to all commands, wire LLD `sheetId`/channel/`LLD Metrics`,
