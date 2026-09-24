@@ -542,9 +542,18 @@ automatically.
   and expiry routing) before relying on it in production. `/help` copy still
   documents only the standard ladder (Phase 3).
 
-**Phase 3 — Polish.**
+**Phase 3 — Polish. — IN PROGRESS.**
 Update `/help`, `README.md`, portfolio screenshots; optional per-ladder
 dashboards.
+
+*Status:*
+- `/help` rewritten: dueler embed explains the HLD/LLD split + the optional
+  `ladder` option and channel inference, and now documents `/stats`,
+  `/titledefends` (`scope`), and `/seasonhistory`; manager embed adds `/newseason`
+  and `/titledefendmode`.
+- `/redisstatus` now reports a **per-ladder breakdown** (challenges + warnings by
+  Redis prefix) plus a legacy/unprefixed tally, instead of a single global count.
+- Remaining: `README.md` refresh + portfolio screenshots.
 
 ---
 

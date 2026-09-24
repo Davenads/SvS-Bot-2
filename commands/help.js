@@ -11,34 +11,46 @@ module.exports = {
         const duelerEmbed = new EmbedBuilder()
             .setColor(0x00AE86)
             .setTitle('📖 SvS Dueler Commands')
-            .setDescription('Available commands for all SvS Duelers')
+            .setDescription('Available commands for all SvS Duelers.\n\n**Two ladders:** HLD (High Level Dueling, the default) and LLD (Low Level Dueling). Most commands take an optional `ladder` option — leave it blank for HLD, or pick `LLD`. Challenge commands instead detect the ladder automatically from the channel you run them in.')
             .addFields(
                 {
                     name: '/challenge [challenger_rank] [target_rank]',
-                    value: 'Challenge another player on the ladder\n• Top 10 players: up to 2 ranks ahead\n• Other players: up to 3 ranks ahead'
+                    value: 'Challenge another player on the ladder\n• Top 10 players: up to 2 ranks ahead\n• Other players: up to 3 ranks ahead\n• Ladder inferred from the challenge channel'
                 },
                 {
                     name: '/reportwin [winner_rank] [loser_rank]',
-                    value: 'Report the outcome of a challenge\n• Must be used by either participant'
+                    value: 'Report the outcome of a challenge\n• Must be used by either participant\n• Ladder inferred from the challenge channel'
                 },
                 {
                     name: '/currentchallenges',
                     value: 'View all active challenges\n• Shows challenger, opponent, and deadline'
                 },
                 {
-                    name: '/currentvacations',
+                    name: '/currentvacations [optional: ladder]',
                     value: 'See which players are on vacation\n• Shows vacation start dates and info'
                 },
                 {
-                    name: '/leaderboard',
-                    value: 'View current SvS ladder rankings\n• Shows players, specs, elements, and status'
+                    name: '/leaderboard [optional: ladder]',
+                    value: 'View current ladder rankings\n• Shows players, specs, elements, and status'
+                },
+                {
+                    name: '/stats [optional: ladder]',
+                    value: 'Show ladder statistics and the title-defense leaderboard\n• Displays the current season plus season and all-time defends'
+                },
+                {
+                    name: '/titledefends [optional: ladder] [optional: scope]',
+                    value: 'Title-defense leaderboard\n• `scope: season` (default) or `alltime`'
+                },
+                {
+                    name: '/seasonhistory [optional: ladder]',
+                    value: 'Browse past season champions\n• Filter by ladder or view all'
                 },
                 {
                     name: '/talrasha [character_name] [element] [optional: notes]',
                     value: 'Sign up for the Tal Rasha tournament\n• Available to all players (no role required)'
                 }
             )
-            .setFooter({ 
+            .setFooter({
                 text: 'Note: @SvS Dueler role required for most commands (except /talrasha)',
                 iconURL: interaction.client.user.displayAvatarURL()
             })
@@ -72,10 +84,18 @@ module.exports = {
                 {
                     name: '/nullchallenges',
                     value: 'Automatically voids all challenges older than 3 days\n• Resets affected players to Available status'
+                },
+                {
+                    name: '/newseason [optional: ladder] [optional: force]',
+                    value: 'Archive the current #1 as season champion and start a new season\n• Records the champion in Season Champions, zeros season defends (keeps all-time)\n• Run BEFORE any ladder reset/shuffle\n• Guarded against double-runs'
+                },
+                {
+                    name: '/titledefendmode [on|off|status] [optional: ladder]',
+                    value: 'Toggle title-defense tracking per ladder'
                 }
             )
-            .setFooter({ 
-                text: 'These commands require the @SvS Manager role',
+            .setFooter({
+                text: 'These commands require the @SvS Manager role • Add the optional ladder option to target LLD',
                 iconURL: interaction.client.user.displayAvatarURL()
             })
             .setTimestamp();
