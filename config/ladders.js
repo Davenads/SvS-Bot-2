@@ -85,7 +85,8 @@ const SHARED_CHALLENGE_CHANNEL_ID = '1553197193849081977'; // #issue-a-challenge
 // Hidden tab that durably maps each dashboard panel to the (channel, message)
 // the bot edits in place, so a restart reconciles state instead of reposting.
 // Columns A->E: Ladder | Panel | Channel ID | Message ID | Last Updated.
-const DASHBOARDS_TAB = 'Dashboards';
+// NOTE: the live tab is named `Dashboard` (singular) — must match exactly.
+const DASHBOARDS_TAB = 'Dashboard';
 
 // Panel identifiers — shared by customIds, Redis keys, and the Dashboards tab.
 const DASHBOARD_PANELS = {
