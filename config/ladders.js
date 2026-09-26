@@ -18,6 +18,8 @@ const LADDERS = {
     sheetName: 'SvS Ladder',
     sheetId: 0,
     challengeChannelId: '1330563945341390959',
+    // Read-only rankings dashboard channel (persistent leaderboard board).
+    rankingsChannelId: '1330563876281913424', // #hld-rankings
     metricsTab: 'Metrics',
     // Extended Vacation tab (bench/insert). Only the tab NAME is used today
     // (values.get/update/clear by range string); no numeric gid is required
@@ -38,6 +40,8 @@ const LADDERS = {
     sheetName: 'LLD SvS Ladder',
     sheetId: 1724011514,
     challengeChannelId: '1547283140995719258', // #lld-challenges
+    // Read-only rankings dashboard channel (persistent leaderboard board).
+    rankingsChannelId: '1553185338556420136', // #lld-rankings
     metricsTab: 'LLD Metrics',
     // LLD Extended Vacation tab (gid 612474986, confirmed by the mods).
     vacationTab: 'LLD Extended Vacation',
@@ -70,10 +74,42 @@ const LADDER_CHOICES = [
   { name: 'LLD', value: 'lld' },
 ];
 
+// --- Channel dashboards (persistent, self-updating panels) -----------------
+// See CHANNEL_DASHBOARDS_PLAN.md. The two rankings boards are per-ladder (the
+// `rankingsChannelId` fields above). The register panel and the issue-a-
+// challenge panel are SHARED across both ladders — the format is chosen inside
+// each button's wizard, and the ladder key rides in every customId.
+const SHARED_REGISTER_CHANNEL_ID = '1553201835026681976';  // #register (bot-only panel)
+const SHARED_CHALLENGE_CHANNEL_ID = '1553197193849081977'; // #issue-a-challenge
+
+// Hidden tab that durably maps each dashboard panel to the (channel, message)
+// the bot edits in place, so a restart reconciles state instead of reposting.
+// Columns A->E: Ladder | Panel | Channel ID | Message ID | Last Updated.
+const DASHBOARDS_TAB = 'Dashboards';
+
+// Panel identifiers — shared by customIds, Redis keys, and the Dashboards tab.
+const DASHBOARD_PANELS = {
+  RANKINGS: 'rankings',
+  REGISTER: 'register',
+  CHALLENGES: 'challenges',
+};
+
+// Deep-link to a specific ladder's sheet tab. `sheetId` is the tab gid, so the
+// URL always targets the correct tab; SPREADSHEET_ID is read at call time so the
+// spreadsheet id lives only in the environment (not duplicated in config).
+function sheetTabUrl(ladder) {
+  return `https://docs.google.com/spreadsheets/d/${process.env.SPREADSHEET_ID}/edit#gid=${ladder.sheetId}`;
+}
+
 module.exports = {
   LADDERS,
   DEFAULT_LADDER_KEY,
   LADDER_CHOICES,
   SEASON_CHAMPIONS_TAB,
   SEASONS_TAB,
+  SHARED_REGISTER_CHANNEL_ID,
+  SHARED_CHALLENGE_CHANNEL_ID,
+  DASHBOARDS_TAB,
+  DASHBOARD_PANELS,
+  sheetTabUrl,
 };
