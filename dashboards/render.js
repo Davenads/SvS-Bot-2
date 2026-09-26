@@ -22,6 +22,7 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 // Same maps the /leaderboard command uses, kept in sync intentionally.
 const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
 const statusEmojiMap = { Available: '✅', Challenge: '❌', Vacation: '🌴' };
+const specEmojiMap = { Vita: '❤️', ES: '🔵' };
 const TOP_N = 10;
 
 // Persistent "View full ladder" button. The board is single-state (Top 10);
@@ -87,4 +88,75 @@ async function buildRankingsPayload(ladder) {
   return { embeds: [embed], components };
 }
 
-module.exports = { buildRankingsPayload };
+// ---------------------------------------------------------------------------
+// Active Challenges board (one per ladder, both living in #issue-a-challenge).
+//
+// Reads the ladder sheet and lists every live Challenge pair. Mirrors the
+// dedup logic of the /currentchallenges command: each pair shows once (a
+// challenge writes BOTH players' rows to 'Challenge' with the opponent rank in
+// column H, so the reverse pairing is skipped). The Challenge write button is
+// attached in a later commit (C2); for now this board is read-only.
+async function buildChallengesPayload(ladder) {
+  const url = sheetTabUrl(ladder);
+  const embed = new EmbedBuilder()
+    .setColor(0x00ae86)
+    .setTitle(`⚔️ ${ladder.displayName} — Active Challenges ⚔️`)
+    .setURL(url)
+    .setTimestamp()
+    .setFooter({ text: 'Auto-updating • Challenges expire after 3 days' });
+
+  let rows = [];
+  try {
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${ladder.sheetName}!A2:H`,
+    });
+    rows = result.data.values || [];
+  } catch (error) {
+    logError(`Dashboard render: failed reading challenges ${ladder.sheetName}`, error);
+    embed.setDescription('⚠️ Challenges are temporarily unavailable. Retrying shortly.');
+    return { embeds: [embed], components: [] };
+  }
+
+  const challenges = rows.filter(row => row[5] === 'Challenge');
+  if (!challenges.length) {
+    embed.setDescription(
+      `No active challenges on the ${ladder.displayName} right now.\n\n**[Open the full ladder in Google Sheets](${url})**`
+    );
+    return { embeds: [embed], components: [] };
+  }
+
+  const processedPairs = new Set();
+  let pairCount = 0;
+  challenges.forEach(challenge => {
+    const challengerRank = challenge[0];
+    const challengerName = challenge[1] || 'Unknown';
+    const challengerElement = challenge[3] || '';
+    const challengedRank = challenge[7];
+    const challengeDate = challenge[6] || 'Unknown';
+
+    const pairKey = `${challengerRank}-${challengedRank}`;
+    const reversePairKey = `${challengedRank}-${challengerRank}`;
+    if (processedPairs.has(reversePairKey)) return;
+    processedPairs.add(pairKey);
+
+    const challengedPlayer = rows.find(row => row[0] === challengedRank);
+    const challengedName = challengedPlayer ? challengedPlayer[1] : 'Unknown';
+    const challengedElement = challengedPlayer ? challengedPlayer[3] : '';
+
+    embed.addFields({
+      name: `Rank #${challengerRank} vs Rank #${challengedRank}`,
+      value: `**${challengerName}** ${elementEmojiMap[challengerElement] || ''} 🆚 **${challengedName}** ${elementEmojiMap[challengedElement] || ''}\nChallenge Date: ${challengeDate}`,
+      inline: false,
+    });
+    pairCount += 1;
+  });
+
+  embed.setDescription(
+    `${pairCount} active challenge${pairCount === 1 ? '' : 's'} — **[Open the full ladder in Google Sheets](${url})**`
+  );
+
+  return { embeds: [embed], components: [] };
+}
+
+module.exports = { buildRankingsPayload, buildChallengesPayload };

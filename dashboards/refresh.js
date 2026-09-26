@@ -14,9 +14,9 @@
 //
 // See CHANNEL_DASHBOARDS_PLAN.md §4.3.
 
-const { LADDERS, DASHBOARD_PANELS } = require('../config/ladders');
+const { LADDERS, DASHBOARD_PANELS, SHARED_CHALLENGE_CHANNEL_ID } = require('../config/ladders');
 const { getDashboardMessage, setDashboardMessage } = require('./registry');
-const { buildRankingsPayload } = require('./render');
+const { buildRankingsPayload, buildChallengesPayload } = require('./render');
 const { logError } = require('../logger');
 
 // Coalesce mutation bursts (a shuffle touches many rows) into one edit per
@@ -25,13 +25,24 @@ const DEBOUNCE_MS = 2500;
 const pending = new Map(); // `${ladderKey}:${panel}` -> timeout handle
 
 // Resolve where a panel lives + its rendered payload for a given ladder.
-// Returns null for panels not yet implemented (register/challenges land later).
+// Returns null for panels not yet implemented (register lands later).
+//
+// The two challenge boards are per-ladder (scope = ladder.key) but share the
+// single #issue-a-challenge channel, so the registry keys (main,challenges) and
+// (lld,challenges) point at two distinct messages in the same channel.
 async function buildPanel(ladder, panel) {
   if (panel === DASHBOARD_PANELS.RANKINGS) {
     return {
       scope: ladder.key,
       channelId: ladder.rankingsChannelId,
       payload: await buildRankingsPayload(ladder),
+    };
+  }
+  if (panel === DASHBOARD_PANELS.CHALLENGES) {
+    return {
+      scope: ladder.key,
+      channelId: SHARED_CHALLENGE_CHANNEL_ID,
+      payload: await buildChallengesPayload(ladder),
     };
   }
   return null;
@@ -94,11 +105,12 @@ function refreshDashboard(client, ladderKey, panel) {
   );
 }
 
-// Startup hydration + periodic safety sweep: reconcile every rankings board
-// (sequential, so the two ladders are naturally staggered).
+// Startup hydration + periodic safety sweep: reconcile every persistent board
+// (sequential, so the ladders/panels are naturally staggered).
 async function hydrateAll(client) {
   for (const ladderKey of Object.keys(LADDERS)) {
     await doRefresh(client, ladderKey, DASHBOARD_PANELS.RANKINGS);
+    await doRefresh(client, ladderKey, DASHBOARD_PANELS.CHALLENGES);
   }
 }
 

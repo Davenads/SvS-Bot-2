@@ -4,6 +4,8 @@ const moment = require('moment-timezone');  // Use moment-timezone for better ti
 const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
+const { refreshDashboard } = require('../dashboards/refresh');
+const { DASHBOARD_PANELS } = require('../config/ladders');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -244,6 +246,11 @@ module.exports = {
                     resource: { requests }
                 });
                 console.log(`├─ Batch update completed successfully`);
+
+                // Refresh the live boards: freed players return to Available
+                // (rankings) and the nullified pairs drop off the challenges board.
+                refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS);
+                refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.CHALLENGES);
 
                 // Create embed message
                 const embed = new EmbedBuilder()

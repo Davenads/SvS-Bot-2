@@ -3,6 +3,8 @@ require('dotenv').config();
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const redisClient = require('../redis-client');
 const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
+const { refreshDashboard } = require('../dashboards/refresh');
+const { DASHBOARD_PANELS } = require('../config/ladders');
 
 const elementEmojis = {
   'Fire': '🔥',
@@ -143,6 +145,11 @@ Discord User: ${opponentDiscUser}`, inline: true }
         )
         .setColor(0xff0000)
         .setTimestamp();
+
+      // Refresh the live boards: both players are back to Available (rankings)
+      // and the pair dropped off the active challenges board.
+      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS);
+      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.CHALLENGES);
 
       await interaction.editReply({ embeds: [embed] });
     } catch (error) {

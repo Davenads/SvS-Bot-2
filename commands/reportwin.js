@@ -455,8 +455,10 @@ ${specEmojis[loserDetails.spec]} ${loserDetails.spec} ${
       // Send result to channel
       await interaction.channel.send({ embeds: [resultEmbed] })
 
-      // Refresh the live rankings board (ranks may have swapped).
+      // Refresh the live boards: ranks may have swapped (rankings) and the
+      // challenge just resolved (active challenges).
       refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS)
+      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.CHALLENGES)
 
       // Confirm to command user
       await interaction.editReply({

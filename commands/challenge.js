@@ -5,6 +5,8 @@ const { logError } = require('../logger')
 const redisClient = require('../redis-client');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderFromChannel } = require('../utils/ladder');
+const { refreshDashboard } = require('../dashboards/refresh');
+const { DASHBOARD_PANELS } = require('../config/ladders');
 
 const sheets = google.sheets({
     version: 'v4',
@@ -308,6 +310,12 @@ ${specEmojiMap[targetRow[2]] || ''} ${elementEmojiMap[targetRow[3]] || ''}`,
         })
 
       await interaction.channel.send({ embeds: [challengeEmbed] })
+
+      // Refresh the live boards: both players flipped to Challenge status
+      // (rankings) and a new pair is now active (active challenges).
+      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS)
+      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.CHALLENGES)
+
       await interaction.editReply({
         content: 'Challenge successfully initiated!'
       })

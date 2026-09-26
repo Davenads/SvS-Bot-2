@@ -4,6 +4,8 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { DateTime } = require('luxon');
 const redisClient = require('../redis-client');
 const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
+const { refreshDashboard } = require('../dashboards/refresh');
+const { DASHBOARD_PANELS } = require('../config/ladders');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -172,6 +174,9 @@ module.exports = {
         )
         .setColor(0x00ff00)
         .setTimestamp();
+
+      // Refresh the active challenges board (the displayed challenge date moved).
+      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.CHALLENGES);
 
       await interaction.editReply({ embeds: [embed] });
     } catch (error) {

@@ -7,6 +7,8 @@ const redisClient = require('./redis-client');
 const { logError } = require('./logger');
 const { getGoogleAuth } = require('./fixGoogleAuth');
 const { parseChallengeKey, getLadderByRedisPrefix } = require('./utils/ladder');
+const { refreshDashboard } = require('./dashboards/refresh');
+const { DASHBOARD_PANELS } = require('./config/ladders');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -264,6 +266,11 @@ async function handleChallengeExpiration(client, challengeKey) {
     });
     
     console.log(`Google Sheet updated for expired ${ladder.displayName} challenge: ${player1Row[1]} vs ${player2Row[1]}`);
+
+    // Refresh the live boards: both players return to Available (rankings) and
+    // the expired pair drops off the active challenges board.
+    refreshDashboard(client, ladder.key, DASHBOARD_PANELS.RANKINGS);
+    refreshDashboard(client, ladder.key, DASHBOARD_PANELS.CHALLENGES);
 
     // Fetch the ladder's challenges channel
     const challengesChannel = await client.channels.fetch(ladder.challengeChannelId);
