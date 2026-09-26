@@ -53,9 +53,10 @@ inside `SvS-Bot-2` — not porting that bot.
 >   (§8, §10 #7).
 > - **Element/build options:** elements Fire/Cold/Light; builds **Vita / ES** (same for
 >   both ladders) (§6, §10 #9).
-> - **Spec emoji canon (D):** **Vita = 🟠 (orange)**, **ES = 🔵 (blue)** — this CHANGES
->   the current code (Vita is ❤️ today; ES is 🟠/🔵 inconsistently). Affects the register
->   wizard **and** existing challenge/reportwin/expiry embeds (§7, §10 #12).
+> - **Spec emoji canon (D):** **Vita = ❤️ (heart)**, **ES = 🔵 (blue)**. Vita is already
+>   ❤️ everywhere in the code, so **only ES** needs standardizing (🟠 → 🔵 in
+>   `challenge.js` / `reportwin.js` / `challenge-expiry-handler.js`; `register.js` is
+>   already 🔵). Much smaller code impact than a Vita change would have been (§7, §10 #12).
 > - **`SvS Dueler` role (C):** the bot never grants/removes it (no `roles.add` anywhere);
 >   it's a manually-assigned prerequisite. Sign Up requires the clicker to already hold
 >   it; Leave does not strip it (§5.1, §9, §10 #11).
@@ -357,7 +358,7 @@ pick:
 3. **Step 1/3 — Element select** (`svs:register:signup_elem:{ladder}`): Cold / Fire /
    Light.
 4. **Step 2/3 — Build select** (`svs:register:signup_build:{ladder}:{element}`): the
-   two spec options **Vita 🟠** / **ES 🔵** (same for both ladders; canonical emoji per
+   two spec options **Vita ❤️** / **ES 🔵** (same for both ladders; canonical emoji per
    §10 #12), with the confirming copy *"element set to ❄️ Cold. Which build?"*.
 5. **Step 3/3 — Modal** (`showModal` off the select interaction): **Character Name
    (required)** + **Notes (optional)** text inputs.
@@ -407,11 +408,12 @@ used as the row's Discord ID.
 - **New modules** — `dashboards/` (render + refresh engine), `interactions/`
   (button/modal/select handlers). No changes to the `commands/` loader contract.
 - **No `Pending Registrations` tab** — approval queue removed.
-- **Spec-emoji standardization (§10 #12)** — set **Vita 🟠 / ES 🔵** as canon. Files
-  carrying the spec emoji map today: `register.js` (`ES:'🔵'`, Vita `❤️`),
-  `challenge.js`, `reportwin.js`, `challenge-expiry-handler.js` (all `ES:'🟠'`, Vita
-  `❤️`), plus any spec emoji in `stats.js` / challenge-listing commands. Update these at
-  build time so the wizard and existing embeds agree.
+- **Spec-emoji standardization (§10 #12)** — canon is **Vita ❤️ / ES 🔵**. Vita is
+  **already ❤️** in every file (`register.js`, `challenge.js`, `reportwin.js`,
+  `challenge-expiry-handler.js`) → **no Vita change needed**. Only **ES** needs
+  standardizing to 🔵: it is already 🔵 in `register.js`, but 🟠 in `challenge.js`,
+  `reportwin.js`, and `challenge-expiry-handler.js` — change those three (plus any spec
+  emoji in `stats.js` / challenge-listing commands) so the wizard and existing embeds agree.
 
 ### 7.1 Persistent panels require QUIET channels (clutter review)
 A persistent dashboard is a single bottom-of-channel message the bot edits in place;
@@ -508,12 +510,12 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
     character, a **manager may remove any** character (§5.1).
 11. **`SvS Dueler` role — RESOLVED:** manual-only prerequisite; the bot never grants or
     removes it. Sign Up requires it; Leave doesn't strip it (§5.1, §9).
-12. **Spec emoji canon — RESOLVED, note code impact:** **Vita = 🟠 (orange)**,
-    **ES = 🔵 (blue)**. Differs from the code today (Vita is ❤️ everywhere; ES is 🔵 in
+12. **Spec emoji canon — RESOLVED, note code impact:** **Vita = ❤️ (heart)**,
+    **ES = 🔵 (blue)**. Vita is already ❤️ everywhere → **no Vita change**. ES is 🔵 in
     `register.js` but 🟠 in `challenge.js` / `reportwin.js` /
-    `challenge-expiry-handler.js`). Standardizing changes **both** the new register
-    wizard **and** those existing embeds — apply during implementation (see the §7
-    spec-emoji bullet).
+    `challenge-expiry-handler.js`; standardize those three to 🔵 so the new register
+    wizard and the existing embeds agree (see the §7 spec-emoji bullet). Small,
+    ES-only change.
 
 ---
 
