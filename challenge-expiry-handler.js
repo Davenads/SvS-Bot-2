@@ -10,6 +10,7 @@ const { parseChallengeKey, getLadderByRedisPrefix } = require('./utils/ladder');
 const { refreshDashboard } = require('./dashboards/refresh');
 const { DASHBOARD_PANELS } = require('./config/ladders');
 const { archiveChallengeThread, sweepOrphanThreads } = require('./services/challengeThreads');
+const { specEmojiMap, elementEmojiMap } = require('./config/emoji');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -22,18 +23,6 @@ const DEFAULT_TIMEZONE = 'America/New_York';
 // Ladder-specific sheet name, numeric sheetId, and challenges channel are now
 // resolved per challenge from the Redis key via parseChallengeKey() / the
 // challenge's ladder segment. See SEASON_AND_LLD_LADDER_PLAN.md §4.4.
-
-// Emoji maps for spec and element indicators
-const specEmojiMap = {
-  Vita: '❤️',
-  ES: '🔵'
-};
-
-const elementEmojiMap = {
-  Fire: '🔥',
-  Light: '⚡',
-  Cold: '❄️'
-};
 
 /**
  * Initialize the challenge expiry handler, setting up event listeners

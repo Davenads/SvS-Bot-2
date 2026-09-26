@@ -16,15 +16,12 @@ const { google } = require('googleapis');
 const moment = require('moment-timezone');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { sheetTabUrl } = require('../config/ladders');
+const { elementEmojiMap, statusEmojiMap } = require('../config/emoji');
 const { logError } = require('../logger');
 
 const sheets = google.sheets({ version: 'v4', auth: getGoogleAuth() });
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
-// Same maps the /leaderboard command uses, kept in sync intentionally.
-const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
-const statusEmojiMap = { Available: '✅', Challenge: '❌', Vacation: '🌴' };
-const specEmojiMap = { Vita: '❤️', ES: '🔵' };
 const TOP_N = 10;
 
 // Challenges expire 3 days after creation (matches the Redis TTL + expiry

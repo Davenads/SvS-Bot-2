@@ -19,10 +19,8 @@ const { EmbedBuilder, ChannelType } = require('discord.js');
 const redisClient = require('../redis-client');
 const { logError } = require('../logger');
 const { SHARED_CHALLENGE_CHANNEL_ID } = require('../config/ladders');
+const { specEmojiMap, elementEmojiMap } = require('../config/emoji');
 const { findManagerMembers } = require('../utils/managers');
-
-const specEmojiMap = { Vita: '❤️', ES: '🔵' };
-const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
 
 // Sidecar lives longer than the challenge (~3 days) so teardown can still
 // resolve the thread at/after expiry. 4 days gives a full day of margin.
@@ -140,6 +138,15 @@ async function createChallengeThread(
   }
 }
 
+// Post a note into a thread, unarchiving first if Discord has archived it (a
+// send to an archived thread is rejected). Best-effort — swallows send/permission
+// errors so callers never have to guard the write.
+async function postThreadNote(thread, text) {
+  if (!text) return;
+  if (thread.archived) await thread.setArchived(false).catch(() => {});
+  await thread.send(text).catch(() => {});
+}
+
 // Archive (never delete — answer 3) the coordination thread for a resolved
 // challenge and drop the sidecar. The threadId is resolved from the sidecar, so
 // this works even at EXPIRY when the challenge value is already gone (the caller
@@ -153,10 +160,7 @@ async function archiveChallengeThread(client, ladder, player1, player2, closingT
     const thread = await client.channels.fetch(threadId).catch(() => null);
     if (thread) {
       // Post the closing note while the thread is still active, then archive.
-      if (closingText) {
-        if (thread.archived) await thread.setArchived(false).catch(() => {});
-        await thread.send(closingText).catch(() => {});
-      }
+      await postThreadNote(thread, closingText);
       await thread
         .setArchived(true)
         .catch(err => logError('Challenge threads: archive failed', err));
@@ -180,10 +184,7 @@ async function persistChallengeThread(client, ladder, player1, player2, noteText
 
     if (noteText) {
       const thread = await client.channels.fetch(threadId).catch(() => null);
-      if (thread) {
-        if (thread.archived) await thread.setArchived(false).catch(() => {});
-        await thread.send(noteText).catch(() => {});
-      }
+      if (thread) await postThreadNote(thread, noteText);
     }
   } catch (error) {
     logError('Challenge threads: persist failed', error);
@@ -210,9 +211,7 @@ async function sweepOrphanThreads(client) {
       if (threadId) {
         const thread = await client.channels.fetch(threadId).catch(() => null);
         if (thread && !thread.archived) {
-          await thread
-            .send('🧹 This challenge is no longer active. Thread archived.')
-            .catch(() => {});
+          await postThreadNote(thread, '🧹 This challenge is no longer active. Thread archived.');
           await thread
             .setArchived(true)
             .catch(err => logError('Challenge threads: orphan archive failed', err));

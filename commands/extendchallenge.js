@@ -162,8 +162,10 @@ module.exports = {
       console.log('Redis challenge updated successfully');
 
       // Keep the coordination thread alive and bump its sidecar TTL to match
-      // the reset challenge lifetime (best-effort; never blocks). §5.6.
-      await persistChallengeThread(
+      // the reset challenge lifetime (best-effort; fire-and-forget so the thread
+      // I/O never delays the reply — it swallows its own errors, matching the
+      // non-awaited dashboard refresh). §5.6.
+      persistChallengeThread(
         interaction.client,
         ladder,
         player1,

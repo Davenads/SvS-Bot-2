@@ -119,8 +119,10 @@ module.exports = {
         };
         await redisClient.removeChallenge(player1, player2, ladder);
         console.log('Challenge removed from Redis');
-        // Archive the coordination thread (best-effort; never blocks). §5.6.
-        await archiveChallengeThread(
+        // Archive the coordination thread (best-effort; fire-and-forget so the
+        // thread I/O never delays the reply — it swallows its own errors,
+        // matching the non-awaited dashboard refresh). §5.6.
+        archiveChallengeThread(
           interaction.client,
           ladder,
           player1,
