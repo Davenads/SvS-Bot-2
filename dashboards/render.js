@@ -174,4 +174,64 @@ async function buildChallengesPayload(ladder) {
   return { embeds: [embed], components };
 }
 
-module.exports = { buildRankingsPayload, buildChallengesPayload };
+// ---------------------------------------------------------------------------
+// #register control panel (SHARED across both ladders — the format is chosen
+// inside each button's wizard, so no ladder rides in these top-level customIds;
+// parseCustomId tolerates a missing ladder segment). This panel is static: it's
+// posted once at hydration and only re-posted if deleted — the buttons carry all
+// the behavior (interactions/registerPanel.js). See CHANNEL_DASHBOARDS_PLAN.md §5.1.
+function buildRegisterPayload() {
+  const embed = new EmbedBuilder()
+    .setColor(0xffa500)
+    .setTitle('⚔️ Join the Ladder')
+    .setDescription(
+      [
+        'Use the buttons below to manage your ladder presence. All actions are self-serve unless noted.',
+        '',
+        '**Sign Up** — register a new character (pick HLD/LLD, element, and build).',
+        '**Leave Ladder** — permanently remove one of your characters.',
+        '**Request / Return from Vacation** — flip your character to 🌴 Vacation and back.',
+        '**Request / Return from Extended Vacation** — notifies the SvS Managers (bench/insert stays manager-run).',
+        '',
+        '_You must hold the **SvS Dueler** role to sign up. Ask an admin if you don\'t have it yet._',
+      ].join('\n')
+    )
+    .setFooter({ text: 'One character per element per ladder • Vita ❤️ / ES 🔵' });
+
+  const components = [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('svs:register:signup')
+        .setLabel('📝 Sign Up')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('svs:register:leave')
+        .setLabel('👋 Leave Ladder')
+        .setStyle(ButtonStyle.Danger)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('svs:register:vacation')
+        .setLabel('🌴 Request Vacation')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('svs:register:unvacation')
+        .setLabel('☀️ Return from Vacation')
+        .setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('svs:register:extvac')
+        .setLabel('🏖️ Request Extended Vacation')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('svs:register:unextvac')
+        .setLabel('🧳 Return from Extended Vacation')
+        .setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+
+  return { embeds: [embed], components };
+}
+
+module.exports = { buildRankingsPayload, buildChallengesPayload, buildRegisterPayload };

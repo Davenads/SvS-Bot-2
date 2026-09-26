@@ -23,7 +23,7 @@ const NAMESPACE = 'svs';
 const handlers = {
   rankings: require('./rankingsPanel'),
   challenges: require('./challengesPanel'),
-  // register panel is added in a later commit.
+  register: require('./registerPanel'),
 };
 
 function parseCustomId(customId) {
