@@ -190,10 +190,52 @@ async function persistChallengeThread(client, ladder, player1, player2, noteText
   }
 }
 
+// Orphan-thread safety sweep (G3, Risk #9). Walks every challenge-thread sidecar
+// and archives any thread whose sibling challenge no longer exists — i.e. the
+// challenge resolved or expired but its teardown was missed (e.g. the bot was
+// down when the keyspace-expiry event fired). Runs off the existing hourly
+// safety check. Best-effort; never throws.
+async function sweepOrphanThreads(client) {
+  try {
+    const keys = await redisClient.listChallengeThreadKeys();
+    if (!keys.length) return;
+
+    let archived = 0;
+    for (const key of keys) {
+      // Challenge still live -> leave its thread alone.
+      const stillActive = await redisClient.challengeExistsForThreadKey(key);
+      if (stillActive) continue;
+
+      const threadId = await redisClient.getChallengeThreadValue(key);
+      if (threadId) {
+        const thread = await client.channels.fetch(threadId).catch(() => null);
+        if (thread && !thread.archived) {
+          await thread
+            .send('🧹 This challenge is no longer active. Thread archived.')
+            .catch(() => {});
+          await thread
+            .setArchived(true)
+            .catch(err => logError('Challenge threads: orphan archive failed', err));
+          archived++;
+        }
+      }
+      // Drop the stale sidecar either way.
+      await redisClient.removeChallengeThreadByKey(key);
+    }
+
+    if (archived) {
+      console.log(`[CHALLENGE THREADS] Orphan sweep archived ${archived} stale thread(s)`);
+    }
+  } catch (error) {
+    logError('Challenge threads: orphan sweep failed', error);
+  }
+}
+
 module.exports = {
   createChallengeThread,
   archiveChallengeThread,
   persistChallengeThread,
+  sweepOrphanThreads,
   THREAD_SIDECAR_TTL,
   pairFromRows,
   ladderTag,

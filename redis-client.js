@@ -699,6 +699,58 @@ class RedisClient extends EventEmitter {
             logError('Error refreshing challenge-thread TTL', error);
         }
     }
+
+    // --- Orphan-thread sweep support (G3) ------------------------------------
+    // List every challenge-thread sidecar key so the hourly safety sweep can
+    // detect threads whose challenge is gone (resolved/expired but never
+    // archived — the leaked-thread case, CHANNEL_DASHBOARDS_PLAN.md Risk #9).
+    async listChallengeThreadKeys() {
+        if (!this.client) return [];
+        try {
+            return await this.client.keys('challenge-thread:*');
+        } catch (error) {
+            console.error('Error listing challenge-thread keys:', error);
+            logError('Error listing challenge-thread keys', error);
+            return [];
+        }
+    }
+
+    async getChallengeThreadValue(key) {
+        if (!this.client) return null;
+        try {
+            return await this.client.get(key);
+        } catch (error) {
+            console.error('Error reading challenge-thread key:', error);
+            logError('Error reading challenge-thread key', error);
+            return null;
+        }
+    }
+
+    async removeChallengeThreadByKey(key) {
+        if (!this.client) return;
+        try {
+            await this.client.del(key);
+        } catch (error) {
+            console.error('Error removing challenge-thread key:', error);
+            logError('Error removing challenge-thread key', error);
+        }
+    }
+
+    // True if the sibling challenge for a thread-sidecar key still exists. The
+    // thread key `challenge-thread:{prefix}:{p1}:{p2}` maps to the challenge key
+    // `challenge:{prefix}:{p1}:{p2}`. Fails SAFE (returns true) on error so the
+    // sweep never archives a thread whose challenge might still be live.
+    async challengeExistsForThreadKey(threadKey) {
+        if (!this.client) return true;
+        const challengeKey = threadKey.replace(/^challenge-thread:/, 'challenge:');
+        try {
+            return (await this.client.exists(challengeKey)) === 1;
+        } catch (error) {
+            console.error('Error checking sibling challenge existence:', error);
+            logError('Error checking sibling challenge existence', error);
+            return true;
+        }
+    }
 }
 
 module.exports = new RedisClient();

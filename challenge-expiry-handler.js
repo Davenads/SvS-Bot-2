@@ -9,7 +9,7 @@ const { getGoogleAuth } = require('./fixGoogleAuth');
 const { parseChallengeKey, getLadderByRedisPrefix } = require('./utils/ladder');
 const { refreshDashboard } = require('./dashboards/refresh');
 const { DASHBOARD_PANELS } = require('./config/ladders');
-const { archiveChallengeThread } = require('./services/challengeThreads');
+const { archiveChallengeThread, sweepOrphanThreads } = require('./services/challengeThreads');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -384,6 +384,10 @@ async function runSafetyCheck(client) {
       }
     }
     
+    // Archive any coordination threads whose challenge no longer exists (missed
+    // teardown -> leaked thread). See CHANNEL_DASHBOARDS_PLAN.md §5.6 / Risk #9.
+    await sweepOrphanThreads(client);
+
     console.log('[CHALLENGE EXPIRY HANDLER] Safety check completed');
   } catch (error) {
     console.error(`[CHALLENGE EXPIRY HANDLER] Error in safety check: ${error.message}`);
