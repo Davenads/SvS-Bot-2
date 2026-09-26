@@ -1,7 +1,9 @@
 # Persistent Channel Dashboards — Plan / Proposal (v5)
 
-**Status:** PROPOSAL + partial build. Dashboards (Phases A–E) still planning; **Phase G
-(challenge threads) is SHIPPED** — see §5.6 / §11 (commits `f7b0f4f`, `b6caca6`, `ac6acc6`).
+**Status:** BUILT (pending live QA). **Phases A–G are all implemented** — the dashboard
+infra, all three panels, the write wizards, polish, and challenge threads are in the
+codebase and deployed. See §11 for per-phase module lists. Remaining work is live click-
+through QA in the server (the code has only had module-load / fail-safe smoke tests).
 **Author context:** Feature requested via phone screenshots of a bot named
 **"SvS LLD League Bot"** (a *different developer's* codebase) showing persistent,
 button-driven channel panels. We are building **our own iteration** of these panels
@@ -627,19 +629,27 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
 
 ## 11. Suggested phasing
 
-- **Phase A — Infra:** interaction router in `index.js`; `Dashboards` registry
-  (sheet+Redis); startup hydration; `refreshDashboard` engine + debounce; config
-  channel IDs + sheet URLs.
-- **Phase B — #rankings (read-only):** lowest risk, no writes. Reuse `/leaderboard`
-  embed + sheet link, live refresh on mutations. Proves the persistence/refresh
-  pipeline.
-- **Phase C — #issue-a-challenge:** Challenge button (reuse challenge service) + Active
-  Challenges board; wire refreshes into all challenge mutations + expiry.
-- **Phase D — #register writes:** Leave, Vacation, Return buttons calling shared
-  services (Extended-Vacation buttons gated per §10 #3).
-- **Phase E — Self-serve Sign Up:** the multi-step Element → Build → Name+Notes flow +
-  the "1 char per element per ladder" validation (§6).
-- **Phase F — Polish:** copy, "view full ladder" button, screenshots.
+- **Phase A — Infra: ✅ BUILT** — interaction router (`interactions/router.js`, wired in
+  `index.js` for button/select/modal), `Dashboard` registry (`dashboards/registry.js`,
+  sheet+Redis), startup hydration + `refreshDashboard` engine/debounce
+  (`dashboards/refresh.js`), config channel IDs + sheet URLs (`config/ladders.js`).
+- **Phase B — #rankings (read-only): ✅ BUILT** — `dashboards/render.js`
+  `buildRankingsPayload` (Top 10 + sheet link) refreshed on every rank mutation;
+  the persistence/refresh pipeline is proven.
+- **Phase C — #issue-a-challenge: ✅ BUILT** — Challenge button + Active Challenges board
+  (`render.js`), write wizard `interactions/challengesPanel.js` reusing
+  `services/challengeService.executeChallenge`; refreshes wired into every challenge
+  mutation + expiry.
+- **Phase D — #register writes: ✅ BUILT** — Leave / Vacation / Return + Extended-Vacation
+  buttons in `interactions/registerPanel.js` calling `services/{character,removal}Service`;
+  Extended-Vacation DMs every `SvS Manager` (never mutates the sheet) per §10 #3.
+- **Phase E — Self-serve Sign Up: ✅ BUILT** — multi-step ladder → element → build →
+  name/notes modal flow (`registerPanel.js` + `services/registrationService.js`) with the
+  one-per-element-per-ladder guard (checked at element list AND at submit) + a Redis
+  submit lock; dueler-role re-checked at entry and submit.
+- **Phase F — Polish: ✅ BUILT** — copy pass; the "View full ladder" ephemeral paginated
+  view (`interactions/rankingsPanel.js`, 10/page); Active Challenges board now shows an
+  expiry countdown (`render.js`, commit `68831fb`). Screenshots remain a manual step.
 - **Phase G — Challenge threads (§5.6): ✅ SHIPPED** — private per-challenge thread in
   `#issue-a-challenge`.
   - **G1 — Creation + sidecar ✅ (`f7b0f4f`):** `executeChallenge` creates the private
