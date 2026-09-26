@@ -33,13 +33,13 @@ const {
 } = require('../services/characterService');
 const { removeCharacterByRank } = require('../services/removalService');
 const { writeNewCharacter, getTakenElements } = require('../services/registrationService');
+const { findManagerMembers } = require('../utils/managers');
 const redisClient = require('../redis-client');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
 
 const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
 const specEmojiMap = { Vita: '❤️', ES: '🔵' };
-const MANAGER_ROLE_NAME = 'SvS Manager';
 const DUELER_ROLE_NAME = 'SvS Dueler';
 const ALL_ELEMENTS = ['Fire', 'Light', 'Cold'];
 const MAX_OPTIONS = 25;
@@ -264,24 +264,6 @@ async function handleLeaveConfirm(interaction, ctx) {
       components: [],
     });
   }
-}
-
-// Resolve the live members holding the SvS Manager role. Prefer the role's
-// cached members; only fall back to a full guild fetch if the cache is empty
-// (this action is infrequent, so the occasional fetch is acceptable).
-async function findManagerMembers(guild) {
-  const role = guild.roles.cache.find(r => r.name === MANAGER_ROLE_NAME);
-  if (!role) return [];
-  let members = role.members;
-  if (!members || members.size === 0) {
-    try {
-      await guild.members.fetch();
-    } catch (error) {
-      logError('Register panel: failed fetching guild members', error);
-    }
-    members = role.members;
-  }
-  return members ? [...members.values()].filter(m => !m.user.bot) : [];
 }
 
 // DM every SvS Manager about an extended-vacation request. Returns delivery

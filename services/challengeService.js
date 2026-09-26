@@ -20,6 +20,7 @@ const { getGoogleAuth } = require('../fixGoogleAuth');
 const { logError } = require('../logger');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
+const { createChallengeThread } = require('./challengeThreads');
 
 const sheets = google.sheets({ version: 'v4', auth: getGoogleAuth() });
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
@@ -236,6 +237,20 @@ async function executeChallenge(client, ladder, { challengerRank, targetRank, us
   // Refresh the live boards.
   refreshDashboard(client, ladder.key, DASHBOARD_PANELS.RANKINGS);
   refreshDashboard(client, ladder.key, DASHBOARD_PANELS.CHALLENGES);
+
+  // Spawn the private coordination thread in #issue-a-challenge (best-effort;
+  // never blocks — the challenge is already recorded). See §5.6.
+  try {
+    await createChallengeThread(client, ladder, {
+      challengerRow,
+      targetRow,
+      challengerRank,
+      targetRank,
+      challengeDate,
+    });
+  } catch (error) {
+    logError('Challenge service: thread creation failed', error);
+  }
 
   return { success: true, challengerRow, targetRow, challengeDate };
 }

@@ -633,6 +633,72 @@ class RedisClient extends EventEmitter {
             logError('Error releasing lock', error);
         }
     }
+
+    // --- Challenge-thread sidecar --------------------------------------------
+    // Durable map of a challenge pair -> its #issue-a-challenge coordination
+    // thread id. Keyed by the SAME sorted (discordId-element) pair as the
+    // challenge key so teardown can resolve the thread from the KEY NAME alone
+    // at expiry, after the challenge value is already gone. TTL is set longer
+    // than the challenge so the mapping outlives it. Mirrors the sibling
+    // `challenge-warning:` key convention (no keyspace side effects: the
+    // `challenge-thread:` prefix does NOT start with `challenge:`).
+    // See CHANNEL_DASHBOARDS_PLAN.md §5.6.
+    generateChallengeThreadKey(player1, player2, ladder) {
+        const prefix = ladderPrefix(ladder);
+        const pair = [
+            `${player1.discordId}-${player1.element}`,
+            `${player2.discordId}-${player2.element}`
+        ].sort(); // Same sort as generateChallengeKey — consistent regardless of order.
+        return `challenge-thread:${prefix}:${pair[0]}:${pair[1]}`;
+    }
+
+    async setChallengeThread(player1, player2, ladder, threadId, ttlSeconds) {
+        if (!this.client) return false;
+        const key = this.generateChallengeThreadKey(player1, player2, ladder);
+        try {
+            await this.client.setex(key, ttlSeconds, String(threadId));
+            console.log(`Set challenge-thread map ${key} -> ${threadId} (ttl ${ttlSeconds}s)`);
+            return true;
+        } catch (error) {
+            console.error('Error setting challenge-thread map:', error);
+            logError('Error setting challenge-thread map', error);
+            return false;
+        }
+    }
+
+    async getChallengeThread(player1, player2, ladder) {
+        if (!this.client) return null;
+        const key = this.generateChallengeThreadKey(player1, player2, ladder);
+        try {
+            return await this.client.get(key);
+        } catch (error) {
+            console.error('Error getting challenge-thread map:', error);
+            logError('Error getting challenge-thread map', error);
+            return null;
+        }
+    }
+
+    async removeChallengeThread(player1, player2, ladder) {
+        if (!this.client) return;
+        const key = this.generateChallengeThreadKey(player1, player2, ladder);
+        try {
+            await this.client.del(key);
+        } catch (error) {
+            console.error('Error removing challenge-thread map:', error);
+            logError('Error removing challenge-thread map', error);
+        }
+    }
+
+    async refreshChallengeThreadTTL(player1, player2, ladder, ttlSeconds) {
+        if (!this.client) return;
+        const key = this.generateChallengeThreadKey(player1, player2, ladder);
+        try {
+            await this.client.expire(key, ttlSeconds);
+        } catch (error) {
+            console.error('Error refreshing challenge-thread TTL:', error);
+            logError('Error refreshing challenge-thread TTL', error);
+        }
+    }
 }
 
 module.exports = new RedisClient();
