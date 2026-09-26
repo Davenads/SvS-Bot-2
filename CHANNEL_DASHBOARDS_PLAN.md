@@ -1,6 +1,7 @@
-# Persistent Channel Dashboards — Plan / Proposal (v3)
+# Persistent Channel Dashboards — Plan / Proposal (v5)
 
-**Status:** DRAFT / PROPOSAL — nothing implemented yet. Planning + open questions only.
+**Status:** PROPOSAL + partial build. Dashboards (Phases A–E) still planning; **Phase G
+(challenge threads) is SHIPPED** — see §5.6 / §11 (commits `f7b0f4f`, `b6caca6`, `ac6acc6`).
 **Author context:** Feature requested via phone screenshots of a bot named
 **"SvS LLD League Bot"** (a *different developer's* codebase) showing persistent,
 button-driven channel panels. We are building **our own iteration** of these panels
@@ -63,6 +64,30 @@ inside `SvS-Bot-2` — not porting that bot.
 > - Challenge **announcement embeds** post to the existing `#challenges` / `#challenges-lld`
 >   (where expiry embeds already go), keeping `#issue-a-challenge` = button + 2 boards
 >   only (§5.3, §7.1).
+>
+> **v5 changes (NEW feature — challenge threads in `#issue-a-challenge`) — SHIPPED:**
+> - Implemented in `services/challengeThreads.js` (+ `utils/managers.js`, sidecar API in
+>   `redis-client.js`) and wired into every challenge lifecycle path. Commits:
+>   `f7b0f4f` (G1 creation + sidecar), `b6caca6` (G2 teardown/persist), `ac6acc6`
+>   (G3 orphan sweep). Live-guild QA still outstanding (see §11).
+> - **NEW: per-challenge private threads.** When a challenge is created, spawn a
+>   **private thread** inside `#issue-a-challenge` as a coordination room for the two
+>   duelers, modeled on the D2R-PvP-1v1-Bot's match threads (coordination + a result
+>   embed, **no ready-check**). New spec §5.6, new **Phase G**, new risk rows.
+> - **Membership/pings (answer 1):** thread is **private**; on creation, **ping both
+>   players and all `SvS Manager` members** (they're added as thread members).
+> - **No ready-check (answer 2):** coordination-only + a pinned challenge-detail embed
+>   (like the reference pic). No availability buttons.
+> - **Archive on resolution (answer 3):** teardown **archives** (does not delete) the
+>   thread so history is preserved and it drops off the 1000-active-thread cap.
+> - **Announcement relationship (answer 4):** **both** — the per-format `#challenges`
+>   announcement embed **stays**, AND the thread is created in `#issue-a-challenge`.
+> - **`/extendchallenge` (answer 5):** the thread **persists** (extend its auto-archive
+>   window); it is **not** recreated and **not** torn down.
+> - **Naming (answer 6):** `⚔️ [HLD] PlayerA (#3) vs PlayerB (#5)` (ladder tag + both
+>   names + ranks).
+> - **Durable mapping (answer 7):** a **Redis sidecar key** maps the challenge pair →
+>   `threadId` (survives the challenge value's destruction at TTL expiry). See §5.6.
 
 ---
 
@@ -343,6 +368,71 @@ the chosen row drives the action.
   all mutate challenges → each must trigger the correct ladder's `challenges` board
   refresh. Expiry auto-null (already event-driven) must also refresh.
 
+### 5.6 Challenge threads — per-challenge coordination rooms (v5 — SHIPPED)
+
+> **Implemented.** Core module `services/challengeThreads.js`; shared manager lookup
+> `utils/managers.js`; sidecar API + sweep helpers in `redis-client.js`. Creation hooks
+> `services/challengeService.js`; teardown/persist wired into `commands/reportwin.js`,
+> `cancelchallenge.js`, `nullchallenges.js`, `extendchallenge.js`, and
+> `challenge-expiry-handler.js` (teardown + hourly orphan sweep). Sidecar key is
+> `challenge-thread:{prefix}:{sortedPair}` (same sorted pair as the challenge key), TTL
+> `THREAD_SIDECAR_TTL = 4 days` (> the ~3-day challenge). All functions are best-effort
+> (never throw / never block the sheet/Redis write).
+
+Modeled on the **D2R-PvP-1v1-Bot** match threads (reference pic): when two players
+enter a challenge, a **private thread** is spawned inside `#issue-a-challenge` as their
+private coordination space. **Coordination-only — no ready-check.**
+
+**Creation (hook: `services/challengeService.js` → `executeChallenge`):**
+- After the challenge is written to the sheet + Redis (`setChallenge`) and the per-format
+  `#challenges` announcement is posted (that **stays** — answer 4), create a **private
+  thread** (`ChannelType.PrivateThread`) on the `#issue-a-challenge` channel.
+  - *Note:* Discord removed the boost-tier gate on private threads (2022) — safe on any
+    server.
+- **Name (answer 6):** `⚔️ [HLD] PlayerA (#3) vs PlayerB (#5)` — ladder tag + both
+  character names + ranks. (Ladder tag disambiguates HLD vs LLD in the shared channel.)
+- **Membership + ping (answer 1):** add **both duelers** and **every `SvS Manager`**
+  member (`thread.members.add(id)` per user — adding a member pings them). Reuse the
+  existing manager-member fetch (`findManagerMembers`, already built for the
+  Extended-Vacation DM).
+- **First message = a pinned challenge-detail embed** (challenger vs target, elements,
+  ranks, expiry countdown, short id, "report your result with `/reportwin`") — like the
+  reference pic. No buttons in v1.
+
+**Durable pair → thread mapping (answer 7 — the expiry wrinkle):**
+- At TTL **expiry** the challenge **value is already gone** — `handleChallengeExpiration`
+  only has the **key name** (`parseChallengeKey` → ladder + both discordId/element pairs).
+  So the `threadId` **cannot** live inside the challenge JSON.
+- Store a **Redis sidecar key** keyed by the same pair identity the challenge key uses:
+  ```
+  svs:challenge-thread:{prefix}:{sortedPair}  ->  threadId
+  ```
+  where `{sortedPair}` mirrors `generateChallengeKey`'s sorted `discordId-element` pair.
+  Give it a **TTL longer than the challenge** (e.g. challenge TTL + a margin) so teardown
+  can still resolve it at/after expiry. This mirrors the existing `challenge-warning:`
+  sidecar-key pattern.
+- Every teardown path re-derives `{sortedPair}` from the challenge it's resolving, `GET`s
+  the sidecar, archives the thread, then `DEL`s the sidecar.
+
+**Teardown — ALL resolution paths must be wired (archive, not delete — answer 3):**
+
+| Path | Action on the thread |
+|---|---|
+| `/reportwin` | Post result to thread → **archive** → del sidecar |
+| `/cancelchallenge` | Post "challenge cancelled" → **archive** → del sidecar |
+| `/nullchallenges` | Per nulled challenge: **archive** + del sidecar |
+| **Expiry** (`handleChallengeExpiration`) | Resolve threadId via sidecar (value gone) → post "expired" → **archive** → del sidecar |
+| **`/extendchallenge`** (answer 5) | **PERSIST** — do **not** archive/recreate. Optionally post "extended to …" + bump the thread's `autoArchiveDuration` / bump the sidecar TTL. |
+
+**Permissions / limits:**
+- Bot needs **Create Private Threads, Send Messages in Threads, Manage Threads** on
+  `#issue-a-challenge`.
+- **1000 active (unarchived) threads / guild** — archiving on every resolution keeps this
+  bounded; a leaked thread (missed teardown) is the main risk (see Risks #9).
+- Thread creation is rate-limited — a burst of simultaneous challenges could throttle;
+  create best-effort and never let a thread failure block the sheet/Redis write (the
+  challenge still counts; log + move on, consistent with §8).
+
 ---
 
 ## 6. Sign-up flow (self-serve — no approval queue)
@@ -429,8 +519,12 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
 - **`#svs-signups`** reverts to legacy/social use (or is retired) — not a dashboard host.
 - **`#issue-a-challenge` — RESOLVED:** the "New Challenge Initiated!" announcement is
   routed to the **existing per-format channel** (`#challenges` / `#challenges-lld`),
-  matching where the expiry handler already posts. `#issue-a-challenge` therefore holds
-  only `[Challenge button + HLD board + LLD board]` and never gets buried.
+  matching where the expiry handler already posts. The channel's **top-level** message
+  flow holds only `[Challenge button + HLD board + LLD board]` so the boards never get
+  buried. **Threads (v5, §5.6) live in the channel's thread list**, not its main message
+  flow, so they don't push the persistent boards down — but confirm the boards remain the
+  last top-level messages after thread activity (thread create/archive events don't post
+  channel-level system messages for private threads).
 - **Rankings channels** are already read-only (bot-only) — no clutter risk.
 
 ---
@@ -521,6 +615,13 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
     `challenge-expiry-handler.js`; standardize those three to 🔵 so the new register
     wizard and the existing embeds agree (see the §7 spec-emoji bullet). Small,
     ES-only change.
+13. **Challenge threads (v5, §5.6) — RESOLVED + SHIPPED (all 7 answers in):** (1) **private**
+    thread, ping **both players + all `SvS Manager`s**; (2) **no ready-check**,
+    coordination + pinned detail embed like the D2R pic; (3) **archive** (not delete) on
+    resolution; (4) **keep** the per-format `#challenges` announcement **and** add the
+    thread; (5) `/extendchallenge` **persists** the thread (no recreate/teardown);
+    (6) name `⚔️ [LADDER] A (#n) vs B (#m)`; (7) durable **Redis sidecar** pair→threadId
+    (TTL > challenge) to survive the expiry value-loss.
 
 ---
 
@@ -539,6 +640,28 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
 - **Phase E — Self-serve Sign Up:** the multi-step Element → Build → Name+Notes flow +
   the "1 char per element per ladder" validation (§6).
 - **Phase F — Polish:** copy, "view full ladder" button, screenshots.
+- **Phase G — Challenge threads (§5.6): ✅ SHIPPED** — private per-challenge thread in
+  `#issue-a-challenge`.
+  - **G1 — Creation + sidecar ✅ (`f7b0f4f`):** `executeChallenge` creates the private
+    thread (name `⚔️ [LADDER] A (#n) vs B (#m)`), adds both duelers + all `SvS Manager`s,
+    posts+pins the detail embed, and writes the `challenge-thread:{prefix}:{sortedPair}`
+    sidecar (TTL 4 days > challenge). Best-effort; never blocks the sheet/Redis write.
+    Extracted `findManagerMembers` to `utils/managers.js` (DRY, Risk #1).
+  - **G2 — Teardown wiring ✅ (`b6caca6`):** archive + del-sidecar on `/reportwin`,
+    `/cancelchallenge`, `/nullchallenges`, and **expiry** (`handleChallengeExpiration`,
+    resolving threadId via the sidecar since the value is gone). `/extendchallenge`
+    **persists** the thread (`persistChallengeThread` bumps the sidecar TTL + posts a note,
+    no teardown).
+  - **G3 — Hardening ✅ (`ac6acc6`):** `sweepOrphanThreads` hooked into the hourly
+    `runSafetyCheck` — archives threads whose sibling challenge no longer exists, then
+    drops the stale sidecar. `challengeExistsForThreadKey` fails **safe** (returns `true`)
+    so a live challenge's thread is never touched.
+  - **Verification so far:** module-load + fail-safe smoke tests only (Redis skipped) —
+    sidecar API present, sorted-pair key `challenge-thread:lld:A-Cold:B-Fire`, null-client
+    guards return `[]`/`true`/`null`. **Outstanding:** live-guild QA on `TEST_GUILD_ID`
+    (real challenge → verify private thread + pings → reportwin → verify archive; confirm
+    the bot holds Create Private Threads / Send Messages in Threads / Manage Threads on
+    `#issue-a-challenge`; test expiry-driven teardown).
 
 Each phase deploys to `TEST_GUILD_ID` first, then live.
 
@@ -556,6 +679,10 @@ Each phase deploys to `TEST_GUILD_ID` first, then live.
 | 6 | Button auth bypass (no command-level role gate) | Med | Re-check roles in every handler |
 | 7 | Cross-ladder bleed in refresh | Low | Ladder key in `customId`; per-ladder refresh |
 | 8 | Extended-Vacation self-serve exposes manager-only behavior unintentionally | Med | Resolve §10 #3 before Phase D |
+| 9 | **Leaked challenge threads** — a missed teardown path leaves threads open, hitting the 1000-active-thread cap | High | Wire **all** resolution paths (reportwin/cancel/null/expiry); G3 orphan sweep archives threads with no live challenge |
+| 10 | **Thread ID lost at expiry** — challenge value is destroyed at TTL, so threadId isn't in the challenge JSON | High | **Redis sidecar** `svs:challenge-thread:{prefix}:{sortedPair}` with TTL > challenge; teardown resolves by pair derived from the key name |
+| 11 | Thread create rate-limit / permission failure on a burst | Med | Best-effort create; failure logs but never blocks the sheet/Redis write (§5.6, §8) |
+| 12 | `/extendchallenge` accidentally recreates or tears down the thread | Low | Extend path is explicitly a **persist** (bump auto-archive + sidecar TTL), never create/archive (answer 5) |
 
 ---
 
@@ -565,3 +692,7 @@ Each phase deploys to `TEST_GUILD_ID` first, then live.
 - No generated image ranking card (use the `/leaderboard` embed).
 - No replacement of the season/`Season Champions` system (already shipped).
 - No web dashboard — Discord-native only.
+- **No ready-check / interactive buttons inside challenge threads (v1)** — the D2R bot's
+  ready-check is explicitly out; challenge threads are coordination-only + a detail embed
+  (§5.6). Buttons could be a later addition.
+- **No thread deletion** — threads are archived, never deleted, on resolution (answer 3).
