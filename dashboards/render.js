@@ -6,12 +6,14 @@
 // existing board message or posts fresh.
 //
 // The rankings panel mirrors the /leaderboard embed but is capped at the Top 10
-// (the full ladder lives behind the sheet hyperlink; a paginated ephemeral view
-// is added in a later commit). See CHANNEL_DASHBOARDS_PLAN.md §5.2.
+// (the full ladder lives behind the sheet hyperlink; the per-viewer paginated
+// ephemeral view is handled by interactions/rankingsPanel.js). See
+// CHANNEL_DASHBOARDS_PLAN.md §5.2.
 
 require('dotenv').config();
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
+const moment = require('moment-timezone');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { sheetTabUrl } = require('../config/ladders');
 const { logError } = require('../logger');
@@ -24,6 +26,39 @@ const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
 const statusEmojiMap = { Available: '✅', Challenge: '❌', Vacation: '🌴' };
 const specEmojiMap = { Vita: '❤️', ES: '🔵' };
 const TOP_N = 10;
+
+// Challenges expire 3 days after creation (matches the Redis TTL + expiry
+// handler). The sheet stores the challenge date as a display string in this
+// timezone, e.g. "9/26, 3:45 PM EDT". The true clock is the Redis TTL, but the
+// board is sheet-only, so we reconstruct the countdown from that string rather
+// than coupling the renderer to Redis.
+const CHALLENGE_TZ = 'America/New_York';
+const CHALLENGE_LIFETIME_DAYS = 3;
+
+// Best-effort "expires in ~Xd Yh" from the stored challenge-date string.
+// Returns null if the string can't be parsed (the board then just omits it).
+function expiryCountdown(challengeDateStr) {
+  if (!challengeDateStr) return null;
+  // Drop the trailing timezone abbreviation ("EDT"/"EST"); moment parses the
+  // zone from CHALLENGE_TZ instead (abbrev parsing is unreliable in moment).
+  const cleaned = challengeDateStr.replace(/\s+[A-Za-z]{2,4}$/, '').trim();
+  const created = moment.tz(cleaned, 'M/D, h:mm A', CHALLENGE_TZ);
+  if (!created.isValid()) return null;
+
+  // The stored string carries no year, so moment assumes the current one. If
+  // that lands more than a day in the future, the challenge was actually made
+  // last year (a Dec challenge read in Jan) — roll back one year.
+  const now = moment.tz(CHALLENGE_TZ);
+  if (created.isAfter(now.clone().add(1, 'day'))) created.subtract(1, 'year');
+
+  const remainingMs = created.clone().add(CHALLENGE_LIFETIME_DAYS, 'days').diff(now);
+  if (remainingMs <= 0) return 'expiring now';
+
+  const dur = moment.duration(remainingMs);
+  const days = Math.floor(dur.asDays());
+  const hours = dur.hours();
+  return days >= 1 ? `expires in ~${days}d ${hours}h` : `expires in ~${hours}h`;
+}
 
 // Persistent "View full ladder" button. The board is single-state (Top 10);
 // this opens a per-viewer ephemeral paginated view (handled by the interaction
@@ -159,9 +194,10 @@ async function buildChallengesPayload(ladder) {
     const challengedName = challengedPlayer ? challengedPlayer[1] : 'Unknown';
     const challengedElement = challengedPlayer ? challengedPlayer[3] : '';
 
+    const countdown = expiryCountdown(challengeDate);
     embed.addFields({
       name: `Rank #${challengerRank} vs Rank #${challengedRank}`,
-      value: `**${challengerName}** ${elementEmojiMap[challengerElement] || ''} 🆚 **${challengedName}** ${elementEmojiMap[challengedElement] || ''}\nChallenge Date: ${challengeDate}`,
+      value: `**${challengerName}** ${elementEmojiMap[challengerElement] || ''} 🆚 **${challengedName}** ${elementEmojiMap[challengedElement] || ''}\nChallenge Date: ${challengeDate}${countdown ? ` • ⏳ ${countdown}` : ''}`,
       inline: false,
     });
     pairCount += 1;
