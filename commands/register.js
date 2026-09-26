@@ -3,19 +3,8 @@ require('dotenv').config();
 
 // Import necessary modules
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { google } = require('googleapis');
-const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderFromOption } = require('../utils/ladder');
-const { refreshDashboard } = require('../dashboards/refresh');
-const { DASHBOARD_PANELS } = require('../config/ladders');
-
-// Initialize the Google Sheets API client
-const sheets = google.sheets({
-    version: 'v4',
-    auth: getGoogleAuth()
-});
-
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const { writeNewCharacter } = require('../services/registrationService');
 
 // Define emoji icons for Spec and Element
 const specEmojis = {
@@ -125,145 +114,17 @@ module.exports = {
         }
 
         try {
-            // Fetch data from the Google Sheet (Main Tab: 'SvS Ladder')
-            const result = await sheets.spreadsheets.values.get({
-                spreadsheetId: SPREADSHEET_ID,
-                range: `${ladder.sheetName}!A2:K`, // Fetch columns A to K
-            });
-
-            const rows = result.data.values;
-            // Find the first empty row based on the Name column (Column B)
-            let emptyRowIndex = rows.length + 2; // Default to appending at the end
-            for (let i = 0; i < rows.length; i++) {
-                if (!rows[i][1]) { // Check if Column B (Name) is empty
-                    emptyRowIndex = i + 2;
-                    break;
-                }
-            }
-
-            const newCharacterRow = [
-                emptyRowIndex - 1, // Rank (new entry based on available position)
-                characterName, // Name
-                spec, // Spec
-                element, // Element
-                discUser, // Discord username
-                'Available', // Status
-                '', // cDate
-                '', // Opp#
-                discUserId, // Discord user ID
-                notes, // Notes
-                '' // Cooldown
-            ];
-
-            // Create requests for copying formatting from an existing row
-            const copyRowIndex = 1; // Assuming row 2 (index 1) has the desired formatting for Spec, Element, and Status columns
-            const requests = [
-                {
-                    copyPaste: {
-                        source: {
-                            sheetId: ladder.sheetId,
-                            startRowIndex: copyRowIndex,
-                            endRowIndex: copyRowIndex + 1,
-                            startColumnIndex: 2,
-                            endColumnIndex: 6
-                        },
-                        destination: {
-                            sheetId: ladder.sheetId,
-                            startRowIndex: emptyRowIndex - 1,
-                            endRowIndex: emptyRowIndex,
-                            startColumnIndex: 2,
-                            endColumnIndex: 6
-                        },
-                        pasteType: 'PASTE_FORMAT'
-                    }
-                },
-                {
-                    copyPaste: {
-                        source: {
-                            sheetId: ladder.sheetId,
-                            startRowIndex: copyRowIndex,
-                            endRowIndex: copyRowIndex + 1,
-                            startColumnIndex: 5,
-                            endColumnIndex: 6
-                        },
-                        destination: {
-                            sheetId: ladder.sheetId,
-                            startRowIndex: emptyRowIndex - 1,
-                            endRowIndex: emptyRowIndex,
-                            startColumnIndex: 5,
-                            endColumnIndex: 6
-                        },
-                        pasteType: 'PASTE_DATA_VALIDATION'
-                    }
-                },
-                {
-                    updateCells: {
-                        range: {
-                            sheetId: ladder.sheetId,
-                            startRowIndex: emptyRowIndex - 1,
-                            endRowIndex: emptyRowIndex,
-                            startColumnIndex: 3, // Element column (D)
-                            endColumnIndex: 4
-                        },
-                        rows: [{
-                            values: [{
-                                userEnteredFormat: {
-                                    backgroundColor: element === 'Cold' ? { red: 0.5, green: 0.635, blue: 1 } :
-                                                    element === 'Fire' ? { red: 0.976, green: 0.588, blue: 0.51 } :
-                                                    { red: 1, green: 0.929, blue: 0.686 }
-                                }
-                            }]
-                        }],
-                        fields: 'userEnteredFormat.backgroundColor'
-                    }
-                },
-                {
-                    updateCells: {
-                        range: {
-                            sheetId: ladder.sheetId,
-                            startRowIndex: emptyRowIndex - 1,
-                            endRowIndex: emptyRowIndex,
-                            startColumnIndex: 1, // Name column (B)
-                            endColumnIndex: 2
-                        },
-                        rows: [{
-                            values: [{
-                                userEnteredFormat: {
-                                    textFormat: {
-                                        bold: true
-                                    }
-                                }
-                            }]
-                        }],
-                        fields: 'userEnteredFormat.textFormat.bold'
-                    }
-                }
-            ];
-
-            // Execute batch update for copying formatting, data validation, and custom styling
-            await sheets.spreadsheets.batchUpdate({
-                spreadsheetId: SPREADSHEET_ID,
-                resource: { requests }
-            });
-
-            // Update the Google Sheet with the new row at the correct position
-            await sheets.spreadsheets.values.update({
-                spreadsheetId: SPREADSHEET_ID,
-                range: `${ladder.sheetName}!A${emptyRowIndex}:K`,
-                valueInputOption: 'RAW',
-                resource: {
-                    values: [newCharacterRow]
-                }
-            });
-
-            // Ensure the Status column (Column F) is set to 'Available' after copying data validation
-            await sheets.spreadsheets.values.update({
-                spreadsheetId: SPREADSHEET_ID,
-                range: `${ladder.sheetName}!F${emptyRowIndex}`,
-                valueInputOption: 'RAW',
-                resource: {
-                    values: [['Available']]
-                }
+            // Shared write core (same path the self-serve Sign Up wizard uses):
+            // finds the first empty row, copies formatting + data validation,
+            // paints the element background, bolds the name, forces status
+            // Available, and refreshes the rankings board.
+            await writeNewCharacter(interaction.client, ladder, {
+                characterName,
+                spec,
+                element,
+                discUser,
+                discUserId,
+                notes
             });
 
             // Create an embed to display the registration details
@@ -281,10 +142,7 @@ module.exports = {
                 .setFooter({ text: 'Successfully added to the SvS Ladder!', iconURL: 'https://example.com/footer_icon.png' })
                 .setTimestamp();
 
-            // Refresh the live rankings board (new character added).
-            refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS);
-
-            // Reply with the embed
+            // Reply with the embed (writeNewCharacter already refreshed the board).
             return interaction.editReply({ embeds: [embed] });
         } catch (error) {
             console.error('Error registering new character:', error);

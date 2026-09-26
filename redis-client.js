@@ -608,6 +608,31 @@ class RedisClient extends EventEmitter {
             throw error;
         }
     }
+
+    // Generic single-use lock (fail-open). Returns true if the lock was acquired
+    // — or if Redis is unavailable — and false only when the key already exists.
+    // Used to de-duplicate rapid double-submits (e.g. the Sign Up modal).
+    async acquireLock(key, ttlSeconds = 30) {
+        if (!this.client) return true; // No Redis (e.g. deploy scripts) — fail open.
+        try {
+            const result = await this.client.set(key, '1', 'EX', ttlSeconds, 'NX');
+            return result !== null;
+        } catch (error) {
+            console.error('Error acquiring lock:', error);
+            logError('Error acquiring lock', error);
+            return true; // Fail open so a Redis hiccup never blocks the user.
+        }
+    }
+
+    async releaseLock(key) {
+        if (!this.client) return;
+        try {
+            await this.client.del(key);
+        } catch (error) {
+            console.error('Error releasing lock:', error);
+            logError('Error releasing lock', error);
+        }
+    }
 }
 
 module.exports = new RedisClient();
