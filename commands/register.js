@@ -6,6 +6,8 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderFromOption } = require('../utils/ladder');
+const { refreshDashboard } = require('../dashboards/refresh');
+const { DASHBOARD_PANELS } = require('../config/ladders');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -278,6 +280,9 @@ module.exports = {
                 .setImage('https://example.com/flair_banner.png') // Add a banner image for flair
                 .setFooter({ text: 'Successfully added to the SvS Ladder!', iconURL: 'https://example.com/footer_icon.png' })
                 .setTimestamp();
+
+            // Refresh the live rankings board (new character added).
+            refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS);
 
             // Reply with the embed
             return interaction.editReply({ embeds: [embed] });

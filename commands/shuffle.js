@@ -5,6 +5,8 @@ const { logError } = require('../logger');
 const redisClient = require('../redis-client');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderFromOption } = require('../utils/ladder');
+const { refreshDashboard } = require('../dashboards/refresh');
+const { DASHBOARD_PANELS } = require('../config/ladders');
 
 const sheets = google.sheets({
     version: 'v4',
@@ -296,6 +298,9 @@ module.exports = {
 
             // Send embed to channel (public announcement)
             await interaction.channel.send({ embeds: [embed] });
+
+            // Refresh the live rankings board (all positions reshuffled).
+            refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS);
 
             // Confirm to command invoker
             await interaction.editReply({

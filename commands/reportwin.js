@@ -8,6 +8,8 @@ const { logError } = require('../logger')
 const redisClient = require('../redis-client');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderFromChannel } = require('../utils/ladder');
+const { refreshDashboard } = require('../dashboards/refresh');
+const { DASHBOARD_PANELS } = require('../config/ladders');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -452,6 +454,9 @@ ${specEmojis[loserDetails.spec]} ${loserDetails.spec} ${
 
       // Send result to channel
       await interaction.channel.send({ embeds: [resultEmbed] })
+
+      // Refresh the live rankings board (ranks may have swapped).
+      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS)
 
       // Confirm to command user
       await interaction.editReply({

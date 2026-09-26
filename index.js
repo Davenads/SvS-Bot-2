@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { initializeChallengeExpiryHandler, runSafetyCheck } = require('./challenge-expiry-handler');
+const { hydrateAll } = require('./dashboards/refresh');
 const { logError } = require('./logger');
 const { logCommandExecution } = require('./utils/commandLogger');
 
@@ -40,12 +41,20 @@ client.once('ready', () => {
     
     // Run a safety check on startup
     runSafetyCheck(client);
-    
+
     // Set up a recurring safety check every hour
     // This ensures we don't miss any expirations due to Redis connection issues
     setInterval(() => {
         runSafetyCheck(client);
     }, 60 * 60 * 1000); // 1 hour in milliseconds
+
+    // Hydrate the persistent dashboards on startup (reconcile / repost boards),
+    // then run a safety sweep every 10 minutes so manual sheet edits and any
+    // missed refresh events self-heal.
+    hydrateAll(client);
+    setInterval(() => {
+        hydrateAll(client);
+    }, 10 * 60 * 1000); // 10 minutes in milliseconds
 });
 
 // Event listener for handling interactions (slash commands and autocomplete)

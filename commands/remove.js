@@ -4,6 +4,8 @@ const { logError } = require('../logger')
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const redisClient = require('../redis-client');
 const { getLadderFromOption } = require('../utils/ladder');
+const { refreshDashboard } = require('../dashboards/refresh');
+const { DASHBOARD_PANELS } = require('../config/ladders');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -401,6 +403,9 @@ module.exports = {
 
       // Send the embed to the channel
       await interaction.channel.send({ embeds: [farewellEmbed] })
+
+      // Refresh the live rankings board (ranks shifted after removal).
+      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS)
 
       // Send confirmation to command issuer
       await interaction.editReply({
