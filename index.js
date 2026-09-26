@@ -5,6 +5,7 @@ const path = require('path');
 const http = require('http');
 const { initializeChallengeExpiryHandler, runSafetyCheck } = require('./challenge-expiry-handler');
 const { hydrateAll } = require('./dashboards/refresh');
+const { routeComponent } = require('./interactions/router');
 const { logError } = require('./logger');
 const { logCommandExecution } = require('./utils/commandLogger');
 
@@ -114,6 +115,11 @@ client.on('interactionCreate', async interaction => {
         } catch (error) {
             logError('Error in autocomplete handler', error);
         }
+    } else if (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) {
+        // Dashboard component handling. Only `svs:`-namespaced components are
+        // routed here; any other component id belongs to a per-message collector
+        // (e.g. /leaderboard pagination) and is intentionally left alone.
+        await routeComponent(interaction);
     }
 });
 

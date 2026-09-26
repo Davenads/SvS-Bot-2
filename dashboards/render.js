@@ -10,7 +10,7 @@
 // is added in a later commit). See CHANNEL_DASHBOARDS_PLAN.md §5.2.
 
 require('dotenv').config();
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { google } = require('googleapis');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const { sheetTabUrl } = require('../config/ladders');
@@ -24,8 +24,23 @@ const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
 const statusEmojiMap = { Available: '✅', Challenge: '❌', Vacation: '🌴' };
 const TOP_N = 10;
 
+// Persistent "View full ladder" button. The board is single-state (Top 10);
+// this opens a per-viewer ephemeral paginated view (handled by the interaction
+// router → interactions/rankingsPanel.js). The ladder key rides in the customId.
+function rankingsComponents(ladder) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`svs:rankings:viewfull:${ladder.key}`)
+        .setLabel('📋 View full ladder')
+        .setStyle(ButtonStyle.Primary)
+    ),
+  ];
+}
+
 async function buildRankingsPayload(ladder) {
   const url = sheetTabUrl(ladder);
+  const components = rankingsComponents(ladder);
   const embed = new EmbedBuilder()
     .setColor(0x00ae86)
     .setTitle(`🏆 ${ladder.displayName} — Live Rankings 🏆`)
@@ -43,14 +58,14 @@ async function buildRankingsPayload(ladder) {
   } catch (error) {
     logError(`Dashboard render: failed reading ${ladder.sheetName}`, error);
     embed.setDescription('⚠️ Rankings are temporarily unavailable. Retrying shortly.');
-    return { embeds: [embed] };
+    return { embeds: [embed], components };
   }
 
   if (!validRows.length) {
     embed.setDescription(
       `No players on the ${ladder.displayName} yet.\n\n**[Open the full ladder in Google Sheets](${url})**`
     );
-    return { embeds: [embed] };
+    return { embeds: [embed], components };
   }
 
   const top = validRows.slice(0, TOP_N);
@@ -69,7 +84,7 @@ async function buildRankingsPayload(ladder) {
     });
   });
 
-  return { embeds: [embed] };
+  return { embeds: [embed], components };
 }
 
 module.exports = { buildRankingsPayload };
