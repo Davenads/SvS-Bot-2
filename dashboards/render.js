@@ -89,15 +89,30 @@ async function buildRankingsPayload(ladder) {
 }
 
 // ---------------------------------------------------------------------------
+// Persistent "Issue a Challenge" button. The ladder rides in the customId so
+// the write flow (interactions/challengesPanel.js) never needs a channel lookup
+// — critical because both boards share the #issue-a-challenge channel.
+function challengesComponents(ladder) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`svs:challenges:new:${ladder.key}`)
+        .setLabel('⚔️ Issue a Challenge')
+        .setStyle(ButtonStyle.Success)
+    ),
+  ];
+}
+
 // Active Challenges board (one per ladder, both living in #issue-a-challenge).
 //
 // Reads the ladder sheet and lists every live Challenge pair. Mirrors the
 // dedup logic of the /currentchallenges command: each pair shows once (a
 // challenge writes BOTH players' rows to 'Challenge' with the opponent rank in
-// column H, so the reverse pairing is skipped). The Challenge write button is
-// attached in a later commit (C2); for now this board is read-only.
+// column H, so the reverse pairing is skipped). The "Issue a Challenge" button
+// is always attached so members can start a challenge straight from the board.
 async function buildChallengesPayload(ladder) {
   const url = sheetTabUrl(ladder);
+  const components = challengesComponents(ladder);
   const embed = new EmbedBuilder()
     .setColor(0x00ae86)
     .setTitle(`⚔️ ${ladder.displayName} — Active Challenges ⚔️`)
@@ -115,7 +130,7 @@ async function buildChallengesPayload(ladder) {
   } catch (error) {
     logError(`Dashboard render: failed reading challenges ${ladder.sheetName}`, error);
     embed.setDescription('⚠️ Challenges are temporarily unavailable. Retrying shortly.');
-    return { embeds: [embed], components: [] };
+    return { embeds: [embed], components };
   }
 
   const challenges = rows.filter(row => row[5] === 'Challenge');
@@ -123,7 +138,7 @@ async function buildChallengesPayload(ladder) {
     embed.setDescription(
       `No active challenges on the ${ladder.displayName} right now.\n\n**[Open the full ladder in Google Sheets](${url})**`
     );
-    return { embeds: [embed], components: [] };
+    return { embeds: [embed], components };
   }
 
   const processedPairs = new Set();
@@ -156,7 +171,7 @@ async function buildChallengesPayload(ladder) {
     `${pairCount} active challenge${pairCount === 1 ? '' : 's'} — **[Open the full ladder in Google Sheets](${url})**`
   );
 
-  return { embeds: [embed], components: [] };
+  return { embeds: [embed], components };
 }
 
 module.exports = { buildRankingsPayload, buildChallengesPayload };

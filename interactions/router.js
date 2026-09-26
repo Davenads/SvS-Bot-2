@@ -22,7 +22,8 @@ const NAMESPACE = 'svs';
 // Panel handlers register here. Each module exports async handle(interaction, ctx).
 const handlers = {
   rankings: require('./rankingsPanel'),
-  // register / challenges panels are added in later commits.
+  challenges: require('./challengesPanel'),
+  // register panel is added in a later commit.
 };
 
 function parseCustomId(customId) {
