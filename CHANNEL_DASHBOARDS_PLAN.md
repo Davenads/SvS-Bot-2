@@ -33,6 +33,35 @@ inside `SvS-Bot-2` — not porting that bot.
 > - Sign-up flow gains a required **Step 0 LLD/HLD select** (shared register channel).
 > - Open flag: the shared challenge channel breaks *slash-command* channel→ladder
 >   inference — needs a routing decision (§10 #2).
+>
+> **v4 changes (all remaining open questions answered + channel IDs in):**
+> - DM target for Extended-Vacation requests = **every member with the `SvS Manager`
+>   role** (§5.1, §10 #3).
+> - **Leave Ladder** = full removal; a normal user removes their own character, a
+>   **manager may remove any** character on the ladder (§5.1, §10 #10).
+> - **Return from Extended Vacation** = a manager runs `/insert` (existing placement) —
+>   no new placement rules (§10 #4).
+> - **Rankings** persistent board shows the leaderboard's **Top 10 (page 1)** + sheet
+>   hyperlink; a **View full ladder** button opens an **ephemeral paginated** view,
+>   **10 players/page** (reuses `/leaderboard`'s First/Prev/Next/Last collector). A
+>   shared persistent message can't be user-paginated, so full paging is ephemeral
+>   (§5.2, §10 #6).
+> - **Sheet links** provided (single spreadsheet, per-tab `#gid=`): HLD `#gid=0`,
+>   LLD `#gid=1724011514` (§7, §10 #5).
+> - **Refresh cadence:** event-driven per mutation (debounced ~2–3s) + a **10-min**
+>   safety sweep; Active Challenges also refresh on the existing keyspace expiry event
+>   (§8, §10 #7).
+> - **Element/build options:** elements Fire/Cold/Light; builds **Vita / ES** (same for
+>   both ladders) (§6, §10 #9).
+> - **Spec emoji canon (D):** **Vita = 🟠 (orange)**, **ES = 🔵 (blue)** — this CHANGES
+>   the current code (Vita is ❤️ today; ES is 🟠/🔵 inconsistently). Affects the register
+>   wizard **and** existing challenge/reportwin/expiry embeds (§7, §10 #12).
+> - **`SvS Dueler` role (C):** the bot never grants/removes it (no `roles.add` anywhere);
+>   it's a manually-assigned prerequisite. Sign Up requires the clicker to already hold
+>   it; Leave does not strip it (§5.1, §9, §10 #11).
+> - Challenge **announcement embeds** post to the existing `#challenges` / `#challenges-lld`
+>   (where expiry embeds already go), keeping `#issue-a-challenge` = button + 2 boards
+>   only (§5.3, §7.1).
 
 ---
 
@@ -254,8 +283,8 @@ Persistent embed + 6 buttons (as in the screenshot). Behaviors:
 
 | Button | Flow | Gate |
 |---|---|---|
-| **Sign Up** | Multi-step self-serve flow (§6). Validates the "1 char per element per ladder" rule, then writes the ladder row + formatting (reuses `/register` core, no manager gate). | Any `SvS Dueler`; enforced by the per-element rule |
-| **Leave Ladder** | Confirm → removes the caller's character (multi-char → select which). Mirrors current removal logic. | Self only; must own a ladder char |
+| **Sign Up** | Multi-step self-serve flow (§6). Validates the "1 char per element per ladder" rule, then writes the ladder row + formatting (reuses `/register` core, no manager gate). | **Must already hold `SvS Dueler`** (re-checked in-handler). Bot does **not** grant the role — no `roles.add` exists in the codebase. |
+| **Leave Ladder** | Confirm → **full removal** from the ladder (mirrors the existing `/remove` re-rank + "Farewell from the Ladder!" flow). **Normal user:** removes their *own* character (multi-char → pick which of own). **Manager:** may select **any** character on the ladder. | Self for normal users; managers unrestricted |
 | **Request Vacation** | Sets the caller's char status = Vacation. | Self; must be registered |
 | **Return from Vacation** | Clears Vacation status. | Self |
 | **Request Extended Vacation** | **Does NOT self-serve.** Sends a **DM to the SvS Managers** with the caller's character + request; a manager then runs `/bench`. Caller gets an ephemeral "request sent." | Manager performs the actual `/bench` |
@@ -266,21 +295,27 @@ clicking the two Extended-Vacation buttons **triggers a DM to the managers** inf
 them of the request — it does **not** move the character itself. Regular Vacation
 (status flag) remains self-serve.
 
-*Design note:* "DM the managers" needs a manager list to message — either everyone
-holding the `SvS Manager` role in the guild, or a configured manager-notify channel /
-user list. See §10 #3.
+*Design note (RESOLVED §10 #3):* "DM the managers" = DM **every member holding the
+`SvS Manager` role** (fetch the role's members and DM each). No separate notify
+channel/list.
 
 Multi-character handling: when the caller owns >1 character on the ladder, the button
 first presents a **select menu of their characters** (`svs:register:charpick:…`) and
 the chosen row drives the action.
 
-### 5.2 `#rankings` — read-only live board
+### 5.2 `#rankings` — read-only live board (one per format)
 - Read-only channel (locked to @everyone send; bot posts/edits only).
-- Content: **the existing `/leaderboard` embed** (reuse its renderer) + a **hyperlink
-  to the ladder's Google Sheet**. No generated image card.
-- Refresh: on every rank-changing mutation + periodic safety sweep.
-- If we ever need paginated depth beyond the persistent embed, a "view full ladder"
-  button can spawn the paginated `/leaderboard` output ephemerally — optional polish.
+- **Persistent board = the `/leaderboard` embed's Top 10 (page 1)** — the existing
+  renderer already breaks pages at 10 fields — + a **hyperlink to the ladder's Google
+  Sheet tab** (§7).
+- **Pagination (RESOLVED §10 #6 — 10/page):** a shared persistent message is
+  single-state, so it can't be *user*-paginated (one viewer's "Next" would change the
+  board for everyone, and `/leaderboard`'s paging is a 60-second per-interaction
+  collector). Resolution: the persistent board carries a **"View full ladder"** button
+  that opens an **ephemeral, per-viewer paginated** leaderboard — **10 players/page**,
+  reusing `/leaderboard`'s First/Prev/Next/Last collector. Each viewer pages their own
+  private copy; the shared board stays fixed at Top 10.
+- Refresh: on every rank-changing mutation + the periodic safety sweep (§8).
 
 ### 5.3 `#issue-a-challenge` — challenge panel (SHARED across both formats)
 - Persistent **"Issue a Challenge"** embed + **Challenge** button.
@@ -293,12 +328,16 @@ the chosen row drives the action.
 - **Two** persistent **"Active Challenges"** boards in this one channel — one titled
   *HLD Active Challenges*, one *LLD Active Challenges* — since a single persistent
   message is single-state. Each auto-updates with its ladder's open challenges
-  (elements, ranks, expiry countdown, short id). (Alternatively one combined embed with
-  two sections; two messages keeps refresh isolation cleaner.)
+  (elements, ranks, expiry countdown, short id).
+- **Challenge announcement embeds do NOT post here (RESOLVED §7.1).** When a challenge
+  is issued, the "⚔️ New Challenge Initiated!" embed posts to the **existing per-format
+  channel** — `#challenges` (HLD) or `#challenges-lld` (LLD) — exactly where the expiry
+  handler already posts warnings/nullifications. This keeps `#issue-a-challenge` a
+  **quiet** channel holding only `[Challenge button + HLD board + LLD board]`, so the
+  boards never get buried.
 - **Ladder inference caveat (see §2.2 / §10 #2):** this shared channel is *not* one of
-  the per-ladder `challengeChannelId`s, so the *slash* commands' channel inference is
-  ambiguous here. Button routing is safe (ladder in `customId`); slash routing needs a
-  decision.
+  the per-ladder `challengeChannelId`s, so the *slash* challenge family stays in
+  `#challenges` / `#challenges-lld`. Button routing is safe (ladder in `customId`).
 - Interplay: `/reportwin`, `/cancelchallenge`, `/extendchallenge`, `/nullchallenges`
   all mutate challenges → each must trigger the correct ladder's `challenges` board
   refresh. Expiry auto-null (already event-driven) must also refresh.
@@ -311,14 +350,15 @@ Per the requester: **no manager approval.** Players sign up directly, bounded on
 the rules. Because `#register` is the **shared** channel, the flow begins with a format
 pick:
 
-1. Click **Sign Up**.
+1. Click **Sign Up**. Handler first re-checks the clicker holds **`SvS Dueler`** (the
+   bot never grants it — §5.1/§9); non-holders get an ephemeral explaining how to get it.
 2. **Step 0 — LLD/HLD select** (`svs:register:signup_fmt`): required (shared channel);
    the chosen ladder key rides in every later `customId`.
 3. **Step 1/3 — Element select** (`svs:register:signup_elem:{ladder}`): Cold / Fire /
    Light.
 4. **Step 2/3 — Build select** (`svs:register:signup_build:{ladder}:{element}`): the
-   spec options (e.g. Vita / ES), with the confirming copy *"element set to ❄️ Cold.
-   Which build?"*.
+   two spec options **Vita 🟠** / **ES 🔵** (same for both ladders; canonical emoji per
+   §10 #12), with the confirming copy *"element set to ❄️ Cold. Which build?"*.
 5. **Step 3/3 — Modal** (`showModal` off the select interaction): **Character Name
    (required)** + **Notes (optional)** text inputs.
 6. **Validation (the only gate):** enforce **one character per element per ladder per
@@ -344,8 +384,9 @@ used as the row's Discord ID.
   ```
   // Per-ladder rankings (split):
   main.rankingsChannelId = '1330563876281913424'   // #hld-rankings
+  main.sheetUrl = 'https://docs.google.com/spreadsheets/d/1Ay8YGTGk1vUSTpD2DteeWeUxXlTCLdtvB-uFKDWIYEU/edit#gid=0'
   lld.rankingsChannelId  = '1553185338556420136'   // #lld-rankings
-  sheetUrl: 'https://docs.google.com/…/edit#gid=<sheetId>',  // per-ladder rankings link
+  lld.sheetUrl  = 'https://docs.google.com/spreadsheets/d/1Ay8YGTGk1vUSTpD2DteeWeUxXlTCLdtvB-uFKDWIYEU/edit#gid=1724011514'
 
   // Shared (not per-ladder) — module-level constants / shared config block:
   SHARED_CHALLENGE_CHANNEL_ID = '1553197193849081977'  // #issue-a-challenge (NEW, button + boards)
@@ -366,6 +407,11 @@ used as the row's Discord ID.
 - **New modules** — `dashboards/` (render + refresh engine), `interactions/`
   (button/modal/select handlers). No changes to the `commands/` loader contract.
 - **No `Pending Registrations` tab** — approval queue removed.
+- **Spec-emoji standardization (§10 #12)** — set **Vita 🟠 / ES 🔵** as canon. Files
+  carrying the spec emoji map today: `register.js` (`ES:'🔵'`, Vita `❤️`),
+  `challenge.js`, `reportwin.js`, `challenge-expiry-handler.js` (all `ES:'🟠'`, Vita
+  `❤️`), plus any spec emoji in `stats.js` / challenge-listing commands. Update these at
+  build time so the wizard and existing embeds agree.
 
 ### 7.1 Persistent panels require QUIET channels (clutter review)
 A persistent dashboard is a single bottom-of-channel message the bot edits in place;
@@ -379,11 +425,10 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
   comes from the `#rankings` board auto-refresh; optional audit log to `#svs-signups`
   or a `#svs-log`.
 - **`#svs-signups`** reverts to legacy/social use (or is retired) — not a dashboard host.
-- **`#issue-a-challenge` caveat:** `/challenge` currently posts a "New Challenge
-  Initiated!" embed into the channel (`interaction.channel.send`). In the shared board
-  channel that would scroll the two Active Challenges boards. Options: pin the boards
-  and accept some scroll, or route the announcement elsewhere / make it ephemeral so the
-  channel holds only `[Challenge button + HLD board + LLD board]`. Decide during Phase C.
+- **`#issue-a-challenge` — RESOLVED:** the "New Challenge Initiated!" announcement is
+  routed to the **existing per-format channel** (`#challenges` / `#challenges-lld`),
+  matching where the expiry handler already posts. `#issue-a-challenge` therefore holds
+  only `[Challenge button + HLD board + LLD board]` and never gets buried.
 - **Rankings channels** are already read-only (bot-only) — no clutter risk.
 
 ---
@@ -409,8 +454,11 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
 
 - **Button auth:** re-check `SvS Dueler` (or the chosen role) inside each handler — the
   `index.js` command-level gate does **not** cover buttons.
-- **Manager-only buttons** (if Extended-Vacation stays manager-gated — open Q): check
-  `SvS Manager` in-handler.
+- **`SvS Dueler` is a manual prerequisite** — the bot never assigns/removes it (no
+  `roles.add`/`roles.remove` in the codebase). Sign Up requires the clicker to already
+  hold it; Leave Ladder does not strip it.
+- **Extended-Vacation buttons DM every `SvS Manager`** (no self-serve mutation); the
+  actual `/bench` / `/insert` stay manager slash commands.
 - **#rankings** locked so only the bot posts; players read.
 - **Ownership checks:** vacation/leave buttons act only on the caller's own
   character(s); never let a click mutate another player's row.
@@ -430,20 +478,42 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
    **All channel IDs now provided** — #register `1553201835026681976`, #hld-rankings
    `1330563876281913424`, #lld-rankings `1553185338556420136`, #issue-a-challenge
    `1553197193849081977`. Channel map is complete.
-3. **Manager DM target — RESOLVED (mechanism):** Extended-Vacation buttons DM managers
-   (no self-serve). Confirm the DM target: every member with the `SvS Manager` role, or
-   a specific manager-notify channel / user-id list?
-4. **Return-from-vacation rank placement:** when restoring from Extended Vacation, what
-   rank does the character re-enter at? (Reuse current `/insert` placement rules.)
-5. **Sheet URL(s):** provide the Google Sheet link (and gid) per ladder for the
-   #rankings hyperlink.
-6. **Rankings depth:** persistent embed shows Top N — what N? Add an optional
-   ephemeral "view full ladder" paginated button?
-7. **Refresh cadence:** instant-on-change + periodic safety sweep (5–10 min) OK?
-8. **Persistence store:** OK to use a hidden `Dashboards` sheet tab (canonical) + Redis
-   cache for message IDs?
-9. **Build/spec options per element:** confirm the exact spec choices offered in Step
-   2/3 (e.g. Vita / ES) and whether they differ by element or ladder.
+3. **Manager DM target — RESOLVED:** DM **every member holding the `SvS Manager`
+   role** (fetch role members, DM each). No notify channel/list.
+4. **Return-from-Extended-Vacation placement — RESOLVED:** handled by the existing
+   **`/insert`** command "for now" — a manager runs it; no new placement rules.
+5. **Sheet URLs — RESOLVED:** one spreadsheet, per-tab `#gid=` anchors —
+   HLD `…/edit#gid=0`, LLD `…/edit#gid=1724011514` (see §7). *How to grab a tab link:*
+   open the tab, then either copy the browser URL (its `#gid=…` = that tab) or
+   right-click the tab at the bottom → **Copy link to this sheet**.
+6. **Rankings depth — RESOLVED:** persistent board = Top 10 (leaderboard page 1) + a
+   **View full ladder** button → **ephemeral paginated, 10/page** (§5.2). Full paging
+   must be ephemeral because a shared persistent message is single-state.
+7. **Refresh cadence — RESOLVED (recommendation):** mirror the existing event-driven +
+   safety-net pattern. **Event-driven:** every mutating command calls
+   `refreshDashboard(ladder, panel)`, debounced ~2–3s. **Safety sweep:** re-render
+   rankings + active-challenges **every 10 minutes** (staggered) to catch manual sheet
+   edits / missed events. Active Challenges also refresh on the existing
+   `__keyevent@0__:expired` keyspace event (already wired). At ~30–60 active players
+   this is a few board edits per sweep — negligible vs Discord's edit limits.
+8. **Persistence store — EXPLAINED + RESOLVED:** the bot must remember *which message*
+   is each dashboard so it **edits that message instead of posting a new one** every
+   refresh (otherwise a restart would spam duplicate panels). Proposal: store each
+   panel's `(channelId, messageId)` in a hidden **`Dashboards`** tab on the *same*
+   spreadsheet (durable — survives restarts / Redis flush) + a Redis cache for fast
+   reads. One extra hidden tab; no schema change to ladder rows. Confirmed OK.
+9. **Element/build options — RESOLVED:** elements **Fire / Cold / Light**; builds
+   **Vita / ES** — same for both ladders.
+10. **Leave Ladder scope — RESOLVED:** full removal; a normal user removes their own
+    character, a **manager may remove any** character (§5.1).
+11. **`SvS Dueler` role — RESOLVED:** manual-only prerequisite; the bot never grants or
+    removes it. Sign Up requires it; Leave doesn't strip it (§5.1, §9).
+12. **Spec emoji canon — RESOLVED, note code impact:** **Vita = 🟠 (orange)**,
+    **ES = 🔵 (blue)**. Differs from the code today (Vita is ❤️ everywhere; ES is 🔵 in
+    `register.js` but 🟠 in `challenge.js` / `reportwin.js` /
+    `challenge-expiry-handler.js`). Standardizing changes **both** the new register
+    wizard **and** those existing embeds — apply during implementation (see the §7
+    spec-emoji bullet).
 
 ---
 
