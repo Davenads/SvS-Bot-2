@@ -284,7 +284,7 @@ Persistent embed + 6 buttons (as in the screenshot). Behaviors:
 
 | Button | Flow | Gate |
 |---|---|---|
-| **Sign Up** | Multi-step self-serve flow (§6). Validates the "1 char per element per ladder" rule, then writes the ladder row + formatting (reuses `/register` core, no manager gate). | **Must already hold `SvS Dueler`** (re-checked in-handler). Bot does **not** grant the role — no `roles.add` exists in the codebase. |
+| **Sign Up** | Multi-step self-serve flow (§6). Validates the "1 char per element per ladder" rule, then writes the ladder row + formatting (reuses `/register` core, no manager gate). | **Must already hold `SvS Dueler`** (re-checked in-handler). Bot does **not** grant the role — **decision (a): keep the gate, admins assign `SvS Dueler` manually.** A brand-new player without the role gets an ephemeral explaining they need an admin to grant it before signing up. No `roles.add` is added to the codebase. |
 | **Leave Ladder** | Confirm → **full removal** from the ladder (mirrors the existing `/remove` re-rank + "Farewell from the Ladder!" flow). **Normal user:** removes their *own* character (multi-char → pick which of own). **Manager:** may select **any** character on the ladder. | Self for normal users; managers unrestricted |
 | **Request Vacation** | Sets the caller's char status = Vacation. | Self; must be registered |
 | **Return from Vacation** | Clears Vacation status. | Self |
@@ -456,9 +456,11 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
 
 - **Button auth:** re-check `SvS Dueler` (or the chosen role) inside each handler — the
   `index.js` command-level gate does **not** cover buttons.
-- **`SvS Dueler` is a manual prerequisite** — the bot never assigns/removes it (no
-  `roles.add`/`roles.remove` in the codebase). Sign Up requires the clicker to already
-  hold it; Leave Ladder does not strip it.
+- **`SvS Dueler` is a manual prerequisite (decision a)** — the bot never assigns/removes
+  it (no `roles.add`/`roles.remove` in the codebase); **admins grant it manually.** Sign
+  Up requires the clicker to already hold it; Leave Ladder does not strip it. The
+  chicken-and-egg (a new player can't self-serve until an admin grants the role) is
+  accepted deliberately — role assignment stays a human/admin gate.
 - **Extended-Vacation buttons DM every `SvS Manager`** (no self-serve mutation); the
   actual `/bench` / `/insert` stay manager slash commands.
 - **#rankings** locked so only the bot posts; players read.
@@ -508,8 +510,11 @@ it only stays tap-able if **nothing else posts in that channel**. Consequences:
    **Vita / ES** — same for both ladders.
 10. **Leave Ladder scope — RESOLVED:** full removal; a normal user removes their own
     character, a **manager may remove any** character (§5.1).
-11. **`SvS Dueler` role — RESOLVED:** manual-only prerequisite; the bot never grants or
-    removes it. Sign Up requires it; Leave doesn't strip it (§5.1, §9).
+11. **`SvS Dueler` role — RESOLVED (decision a):** **keep the gate; the bot never grants
+    or removes the role — admins assign it manually.** Sign Up requires the clicker to
+    already hold it; Leave doesn't strip it. The chicken-and-egg (a brand-new player must
+    get the role from an admin before self-serve signup works) is accepted on purpose;
+    no `roles.add` is introduced (§5.1, §9).
 12. **Spec emoji canon — RESOLVED, note code impact:** **Vita = ❤️ (heart)**,
     **ES = 🔵 (blue)**. Vita is already ❤️ everywhere → **no Vita change**. ES is 🔵 in
     `register.js` but 🟠 in `challenge.js` / `reportwin.js` /
