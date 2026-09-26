@@ -1,19 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
-const { google } = require('googleapis')
 const { logError } = require('../logger')
-const { getGoogleAuth } = require('../fixGoogleAuth');
-const redisClient = require('../redis-client');
 const { getLadderFromOption } = require('../utils/ladder');
-const { refreshDashboard } = require('../dashboards/refresh');
-const { DASHBOARD_PANELS } = require('../config/ladders');
-
-// Initialize the Google Sheets API client
-const sheets = google.sheets({
-  version: 'v4',
-  auth: getGoogleAuth()
-});
-
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID
+const { removeCharacterByRank } = require('../services/removalService');
 
 // Emoji mappings
 const elementEmojis = {
@@ -83,287 +71,19 @@ module.exports = {
     try {
       const rankToRemove = interaction.options.getInteger('rank')
 
-      // Fetch data from main sheet
-      const mainResult = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${ladder.sheetName}!A2:K`
-      })
-
-      const rows = mainResult.data.values
-      if (!rows || !rows.length) {
-        console.log('└─ Error: No data found in leaderboard')
-        return interaction.editReply({
-          content: 'No data available on the leaderboard.',
-          ephemeral: true
-        })
-      }
-
-      // Find the row to remove
-      const rowIndex = rows.findIndex(
-        row => row[0] && parseInt(row[0]) === rankToRemove
-      )
-      if (rowIndex === -1) {
-        console.log(`└─ Error: Rank ${rankToRemove} not found`)
-        return interaction.editReply({
-          content: 'Rank not found in the ladder.',
-          ephemeral: true
-        })
-      }
-
-      // Store player details
-      const playerData = rows[rowIndex]
-      const playerName = playerData[1]
-      const playerSpec = playerData[2]
-      const playerElement = playerData[3]
-      const discordUsername = playerData[4]
-      const discordId = playerData[8]
-
       console.log('├─ Removing Player:')
-      console.log(`│  ├─ Rank: #${rankToRemove}`)
-      console.log(`│  └─ Discord: ${discordUsername}`)
+      console.log(`│  └─ Rank: #${rankToRemove}`)
 
-      // Create batch update requests
-      const requests = []
-
-      // Handle active challenges affected by removal
-      // First, check for any challenge pairs that span across the removed rank
-      for (let i = 0; i < rows.length; i++) {
-        const currentRow = rows[i]
-        if (!currentRow[0] || !currentRow[7]) continue
-
-        const currentRank = parseInt(currentRow[0])
-        const oppRank = parseInt(currentRow[7])
-
-        // Check if this challenge pair spans across the removed rank
-        if (
-          currentRow[5] === 'Challenge' &&
-          ((currentRank < rankToRemove && oppRank > rankToRemove) ||
-            (currentRank > rankToRemove && oppRank < rankToRemove))
-        ) {
-          console.log(
-            `├─ Found spanning challenge pair: Rank ${currentRank} vs Rank ${oppRank}`
-          )
-
-          // For the player above the removed rank, update their Opp# to reflect their opponent's new rank
-          if (currentRank < rankToRemove) {
-            requests.push({
-              updateCells: {
-                range: {
-                  sheetId: ladder.sheetId,
-                  startRowIndex: i + 1,
-                  endRowIndex: i + 2,
-                  startColumnIndex: 7,
-                  endColumnIndex: 8
-                },
-                rows: [
-                  {
-                    values: [
-                      {
-                        userEnteredValue: {
-                          stringValue: (oppRank - 1).toString()
-                        },
-                        userEnteredFormat: { horizontalAlignment: 'RIGHT' }
-                      }
-                    ]
-                  }
-                ],
-                fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
-              }
-            })
-          }
-        }
+      // All sheet mutation, re-ranking, Redis cleanup, and board refreshes live
+      // in the shared removal service (also used by the #register Leave button).
+      const result = await removeCharacterByRank(interaction.client, ladder, rankToRemove)
+      if (!result.success) {
+        console.log(`└─ Error: ${result.reason}`)
+        return interaction.editReply({ content: result.reason, ephemeral: true })
       }
 
-      // Handle direct challenges with the removed player
-      if (playerData[5] === 'Challenge' && playerData[7]) {
-        const opponentRank = parseInt(playerData[7])
-        const opponentIndex = rows.findIndex(
-          row => row[0] && parseInt(row[0]) === opponentRank
-        )
-
-        if (opponentIndex !== -1) {
-          console.log(`├─ Clearing challenge with rank #${opponentRank}`)
-
-          // Clean up Redis challenge timer
-          try {
-            const player1 = { discordId: playerData[8], element: playerData[3] };
-            const player2 = { discordId: rows[opponentIndex][8], element: rows[opponentIndex][3] };
-            await redisClient.removeChallenge(player1, player2, ladder);
-            console.log('├─ Challenge removed from Redis');
-          } catch (error) {
-            console.error('├─ Error removing challenge from Redis:', error);
-          }
-
-          requests.push({
-            updateCells: {
-              range: {
-                sheetId: ladder.sheetId,
-                startRowIndex: opponentIndex + 1,
-                endRowIndex: opponentIndex + 2,
-                startColumnIndex: 5,
-                endColumnIndex: 8
-              },
-              rows: [
-                {
-                  values: [
-                    { userEnteredValue: { stringValue: 'Available' } },
-                    { userEnteredValue: { stringValue: '' } },
-                    {
-                      userEnteredValue: { stringValue: '' },
-                      userEnteredFormat: { horizontalAlignment: 'RIGHT' }
-                    }
-                  ]
-                }
-              ],
-              fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
-            }
-          })
-        }
-      }
-
-      // Delete the row from main ladder
-      requests.push({
-        deleteDimension: {
-          range: {
-            sheetId: ladder.sheetId,
-            dimension: 'ROWS',
-            startIndex: rowIndex + 1,
-            endIndex: rowIndex + 2
-          }
-        }
-      })
-
-      // Update remaining ranks and opponent references
-      let ranksUpdated = 0
-      for (let i = rowIndex + 1; i < rows.length; i++) {
-        const currentRow = rows[i]
-        if (!currentRow[0]) continue
-
-        const currentRank = parseInt(currentRow[0])
-        const newRank = currentRank - 1
-        ranksUpdated++
-
-        // Update rank number
-        requests.push({
-          updateCells: {
-            range: {
-              sheetId: ladder.sheetId,
-              startRowIndex: i,
-              endRowIndex: i + 1,
-              startColumnIndex: 0,
-              endColumnIndex: 1
-            },
-            rows: [
-              {
-                values: [
-                  {
-                    userEnteredValue: { stringValue: newRank.toString() },
-                    userEnteredFormat: { horizontalAlignment: 'RIGHT' }
-                  }
-                ]
-              }
-            ],
-            fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
-          }
-        })
-
-        // Update opponent references if needed
-        if (currentRow[5] === 'Challenge' && currentRow[7]) {
-          const oppRank = parseInt(currentRow[7])
-
-          if (oppRank > rankToRemove) {
-            console.log(
-              `├─ Updating opponent reference: Rank #${currentRank} -> #${newRank}`
-            )
-            requests.push({
-              updateCells: {
-                range: {
-                  sheetId: ladder.sheetId,
-                  startRowIndex: i,
-                  endRowIndex: i + 1,
-                  startColumnIndex: 7,
-                  endColumnIndex: 8
-                },
-                rows: [
-                  {
-                    values: [
-                      {
-                        userEnteredValue: {
-                          stringValue: (oppRank - 1).toString()
-                        },
-                        userEnteredFormat: { horizontalAlignment: 'RIGHT' }
-                      }
-                    ]
-                  }
-                ],
-                fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
-              }
-            })
-          } else if (oppRank === rankToRemove) {
-            console.log(
-              `├─ Resetting challenge status for rank #${currentRank}`
-            )
-            requests.push({
-              updateCells: {
-                range: {
-                  sheetId: ladder.sheetId,
-                  startRowIndex: i,
-                  endRowIndex: i + 1,
-                  startColumnIndex: 5,
-                  endColumnIndex: 8
-                },
-                rows: [
-                  {
-                    values: [
-                      { userEnteredValue: { stringValue: 'Available' } },
-                      { userEnteredValue: { stringValue: '' } },
-                      {
-                        userEnteredValue: { stringValue: '' },
-                        userEnteredFormat: { horizontalAlignment: 'RIGHT' }
-                      }
-                    ]
-                  }
-                ],
-                fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
-              }
-            })
-          }
-        }
-      }
-
-      console.log(`├─ Updated ${ranksUpdated} ranks`)
-
-      // Execute all updates
-      if (requests.length > 0) {
-        await sheets.spreadsheets.batchUpdate({
-          spreadsheetId: SPREADSHEET_ID,
-          resource: { requests }
-        })
-      }
-
-      // Verify ranks
-      const verificationResult = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${ladder.sheetName}!A2:A`
-      })
-
-      const updatedRanks = verificationResult.data.values
-      let ranksAreCorrect = true
-      let firstIncorrectRank = null
-
-      if (updatedRanks) {
-        for (let i = 0; i < updatedRanks.length; i++) {
-          if (updatedRanks[i][0] && parseInt(updatedRanks[i][0]) !== i + 1) {
-            ranksAreCorrect = false
-            firstIncorrectRank = i + 1
-            break
-          }
-        }
-      }
-
-      console.log(
-        `└─ Rank verification: ${ranksAreCorrect ? 'Success' : 'Failed'}`
-      )
+      const { player, ranksAreCorrect } = result
+      console.log(`└─ Rank verification: ${ranksAreCorrect ? 'Success' : 'Failed'}`)
 
       // Create farewell embed
       const farewellEmbed = new EmbedBuilder()
@@ -375,19 +95,19 @@ module.exports = {
         .addFields(
           {
             name: '🎭 Character',
-            value: `**${playerName}** (Rank #${rankToRemove})`,
+            value: `**${player.name}** (Rank #${player.rank})`,
             inline: true
           },
           {
             name: '⚔️ Build',
-            value: `${specEmojis[playerSpec] || ''} ${playerSpec} ${
-              elementEmojis[playerElement] || ''
-            } ${playerElement}`,
+            value: `${specEmojis[player.spec] || ''} ${player.spec} ${
+              elementEmojis[player.element] || ''
+            } ${player.element}`,
             inline: true
           },
           {
             name: '👤 Discord',
-            value: discordId ? `<@${discordId}>` : discordUsername,
+            value: player.discordId ? `<@${player.discordId}>` : player.discordUsername,
             inline: true
           }
         )
@@ -404,12 +124,9 @@ module.exports = {
       // Send the embed to the channel
       await interaction.channel.send({ embeds: [farewellEmbed] })
 
-      // Refresh the live rankings board (ranks shifted after removal).
-      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS)
-
       // Send confirmation to command issuer
       await interaction.editReply({
-        content: `Successfully removed ${playerName} from the ladder and updated all affected rankings and challenges.`,
+        content: `Successfully removed ${player.name} from the ladder and updated all affected rankings and challenges.`,
         ephemeral: true
       })
     } catch (error) {

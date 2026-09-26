@@ -8,14 +8,21 @@
 //
 // Implemented so far:
 //   D2 — Request / Return from Vacation (self-serve status flips, below)
+//   D3 — Leave Ladder (self-serve removal via the shared removalService)
 // Still stubbed (friendly ephemerals until their commit lands):
-//   D3 — Leave Ladder (shared removal service)
 //   D4 — Extended-Vacation buttons (DM the SvS Managers)
 //   Phase E — Sign Up (multi-step self-serve registration)
 
-const { ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+const {
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} = require('discord.js');
 const { logError } = require('../logger');
+const { LADDERS } = require('../config/ladders');
 const { findUserCharacters, setCharacterStatus } = require('../services/characterService');
+const { removeCharacterByRank } = require('../services/removalService');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
 
@@ -34,8 +41,6 @@ async function ephemeral(interaction, content) {
 const STUBS = {
   signup:
     '📝 **Sign Up** is coming soon. For now, ask an **SvS Manager** to run `/register` for you.',
-  leave:
-    '👋 **Leave Ladder** is coming soon. For now, ask an **SvS Manager** to run `/remove` for your character.',
   extvac:
     '🏖️ **Extended Vacation** requests are coming soon. For now, ask an **SvS Manager** to run `/bench`.',
   unextvac:
@@ -140,6 +145,113 @@ async function handleVacationPick(interaction, direction) {
   );
 }
 
+// A one-off confirm/cancel row for a specific character. The confirm button
+// carries `${ladderKey}:${rank}` so the destructive step needs no state.
+function leaveConfirmRow(char) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`svs:register:leaveconfirm:${char.ladderKey}:${char.rank}`)
+      .setLabel('Yes, remove me')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId('svs:register:leavecancel')
+      .setLabel('Cancel')
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+// Leave Ladder — self-serve for a member's OWN characters. Managers who need to
+// remove an arbitrary rank still use /remove. Presents a confirmation before the
+// irreversible removal (re-rank + Redis cleanup) runs.
+async function handleLeave(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  const chars = await findUserCharacters(interaction.user.id);
+  if (!chars.length) {
+    return interaction.editReply({
+      content: 'You have no registered characters on either ladder.',
+    });
+  }
+
+  if (chars.length === 1) {
+    const c = chars[0];
+    return interaction.editReply({
+      content: `⚠️ Remove **${c.name}** (Rank #${c.rank}, ${c.ladder.displayName}) from the ladder? This is permanent and re-ranks everyone below.`,
+      components: [leaveConfirmRow(c)],
+    });
+  }
+
+  return interaction.editReply({
+    content: 'Which character do you want to remove from the ladder?',
+    components: [characterSelectRow('svs:register:leavepick', 'Select a character to remove', chars)],
+  });
+}
+
+// A character was picked from the multi-character select — show the confirm step.
+async function handleLeavePick(interaction) {
+  await interaction.deferUpdate();
+  const [ladderKey, rank] = String(interaction.values[0]).split(':');
+  const chars = await findUserCharacters(interaction.user.id);
+  const char = chars.find(
+    c => c.ladderKey === ladderKey && String(c.rank) === String(rank)
+  );
+
+  if (!char) {
+    return interaction.editReply({
+      content: 'That character could no longer be found. Please try again.',
+      components: [],
+    });
+  }
+
+  return interaction.editReply({
+    content: `⚠️ Remove **${char.name}** (Rank #${char.rank}, ${char.ladder.displayName}) from the ladder? This is permanent and re-ranks everyone below.`,
+    components: [leaveConfirmRow(char)],
+  });
+}
+
+// Final step — re-verify the caller still owns that rank, then remove via the
+// shared removal service (identical to /remove: sheet mutation, re-rank, Redis
+// cleanup, board refreshes).
+async function handleLeaveConfirm(interaction, ctx) {
+  await interaction.deferUpdate();
+  const ladderKey = ctx.ladderKey;
+  const rank = parseInt(ctx.extra[0]);
+  const ladder = LADDERS[ladderKey];
+
+  if (!ladder || Number.isNaN(rank)) {
+    return interaction.editReply({ content: 'Unknown ladder or rank.', components: [] });
+  }
+
+  // Re-verify ownership so the button can't remove someone else's rank if the
+  // ladder shifted between render and click.
+  const chars = await findUserCharacters(interaction.user.id);
+  const char = chars.find(
+    c => c.ladderKey === ladderKey && String(c.rank) === String(rank)
+  );
+  if (!char) {
+    return interaction.editReply({
+      content: 'That character is no longer at that rank (the ladder may have shifted). Please try again.',
+      components: [],
+    });
+  }
+
+  try {
+    const result = await removeCharacterByRank(interaction.client, ladder, rank);
+    if (!result.success) {
+      return interaction.editReply({ content: `❌ ${result.reason}`, components: [] });
+    }
+    return interaction.editReply({
+      content: `👋 **${result.player.name}** has left the ${ladder.displayName}. All affected rankings and challenges were updated.`,
+      components: [],
+    });
+  } catch (error) {
+    logError('Register panel: leave confirm failed', error);
+    return interaction.editReply({
+      content: 'An error occurred while removing your character. Please try again later.',
+      components: [],
+    });
+  }
+}
+
 async function handle(interaction, ctx) {
   switch (ctx.action) {
     case 'vacation':
@@ -150,6 +262,15 @@ async function handle(interaction, ctx) {
       return handleVacationPick(interaction, 'to');
     case 'unvacpick':
       return handleVacationPick(interaction, 'from');
+    case 'leave':
+      return handleLeave(interaction);
+    case 'leavepick':
+      return handleLeavePick(interaction);
+    case 'leaveconfirm':
+      return handleLeaveConfirm(interaction, ctx);
+    case 'leavecancel':
+      await interaction.deferUpdate();
+      return interaction.editReply({ content: 'Cancelled — no changes made.', components: [] });
     default: {
       const message = STUBS[ctx.action];
       if (message) return ephemeral(interaction, message);
