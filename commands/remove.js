@@ -12,7 +12,7 @@ const elementEmojis = {
 
 const specEmojis = {
   Vita: '❤️',
-  ES: '🟠'
+  ES: '🔵'
 }
 
 const farewellMessages = [

@@ -75,7 +75,7 @@ module.exports = {
 
             const specEmojiMap = {
                 'Vita': '❤️',
-                'ES': '🟠'
+                'ES': '🔵'
             };
 
             // Process rows into multiple embeds if necessary

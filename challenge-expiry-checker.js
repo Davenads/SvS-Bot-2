@@ -26,7 +26,7 @@ const DEFAULT_TIMEZONE = 'America/New_York';
 // Emoji maps for spec and element indicators
 const specEmojiMap = {
   Vita: '❤️',
-  ES: '🟠'
+  ES: '🔵'
 };
 
 const elementEmojiMap = {
