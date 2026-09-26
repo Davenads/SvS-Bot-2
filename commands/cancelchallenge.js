@@ -5,6 +5,7 @@ const redisClient = require('../redis-client');
 const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
+const { archiveChallengeThread } = require('../services/challengeThreads');
 
 const elementEmojis = {
   'Fire': '🔥',
@@ -118,6 +119,14 @@ module.exports = {
         };
         await redisClient.removeChallenge(player1, player2, ladder);
         console.log('Challenge removed from Redis');
+        // Archive the coordination thread (best-effort; never blocks). §5.6.
+        await archiveChallengeThread(
+          interaction.client,
+          ladder,
+          player1,
+          player2,
+          '⚔️ This challenge was cancelled by a manager. Thread archived.'
+        );
       } catch (error) {
         console.error('Error removing challenge from Redis:', error);
         // Continue with the cancellation even if Redis removal fails

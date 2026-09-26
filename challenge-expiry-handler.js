@@ -9,6 +9,7 @@ const { getGoogleAuth } = require('./fixGoogleAuth');
 const { parseChallengeKey, getLadderByRedisPrefix } = require('./utils/ladder');
 const { refreshDashboard } = require('./dashboards/refresh');
 const { DASHBOARD_PANELS } = require('./config/ladders');
+const { archiveChallengeThread } = require('./services/challengeThreads');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -271,6 +272,17 @@ async function handleChallengeExpiration(client, challengeKey) {
     // the expired pair drops off the active challenges board.
     refreshDashboard(client, ladder.key, DASHBOARD_PANELS.RANKINGS);
     refreshDashboard(client, ladder.key, DASHBOARD_PANELS.CHALLENGES);
+
+    // Archive the coordination thread. The challenge VALUE is gone at expiry, so
+    // the threadId is resolved from the durable sidecar keyed by the pair parsed
+    // from the KEY NAME above (§5.6, Risk #10). Best-effort; never throws.
+    await archiveChallengeThread(
+      client,
+      ladder,
+      { discordId: discordId1, element: element1 },
+      { discordId: discordId2, element: element2 },
+      '⏰ This challenge expired after reaching the 3-day time limit. Thread archived.'
+    );
 
     // Fetch the ladder's challenges channel
     const challengesChannel = await client.channels.fetch(ladder.challengeChannelId);

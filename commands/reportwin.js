@@ -10,6 +10,7 @@ const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderFromChannel } = require('../utils/ladder');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
+const { archiveChallengeThread } = require('../services/challengeThreads');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -306,6 +307,14 @@ module.exports = {
         };
         await redisClient.removeChallenge(winnerPlayer, loserPlayer, ladder);
         console.log('├─ Removed challenge from Redis tracking');
+        // Archive the coordination thread (best-effort; never blocks). §5.6.
+        await archiveChallengeThread(
+          interaction.client,
+          ladder,
+          winnerPlayer,
+          loserPlayer,
+          `⚔️ Result reported — **${winnerDetails.name}** (#${winnerRank}) defeated **${loserDetails.name}** (#${loserRank}). Thread archived.`
+        );
       } catch (error) {
         console.error('Error removing challenge from Redis:', error);
         // Continue with the report even if Redis removal fails

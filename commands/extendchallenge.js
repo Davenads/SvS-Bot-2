@@ -6,6 +6,7 @@ const redisClient = require('../redis-client');
 const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
+const { persistChallengeThread } = require('../services/challengeThreads');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -159,6 +160,16 @@ module.exports = {
       };
       await redisClient.updateChallenge(player1, player2, formattedDate, ladder);
       console.log('Redis challenge updated successfully');
+
+      // Keep the coordination thread alive and bump its sidecar TTL to match
+      // the reset challenge lifetime (best-effort; never blocks). §5.6.
+      await persistChallengeThread(
+        interaction.client,
+        ladder,
+        player1,
+        player2,
+        `⏳ This challenge was extended. New date: ${formattedDate}.`
+      );
 
       // Prepare an embed message to confirm the extension
       const playerNameText = playerRow[1];

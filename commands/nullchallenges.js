@@ -6,6 +6,7 @@ const { getGoogleAuth } = require('../fixGoogleAuth');
 const { getLadderByKey, getLadderFromChannel } = require('../utils/ladder');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
+const { archiveChallengeThread } = require('../services/challengeThreads');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -226,13 +227,18 @@ module.exports = {
 
                 // Store challenge details for the embed message
                 const opponentName = rows.find(r => r[0] === challenge.opponent)?.[1] || 'Unknown';
+                const challengerRow = rows[challenge.rowIndex];
+                const opponentRow = opponentRowIndex !== -1 ? rows[opponentRowIndex] : null;
                 nullifiedChallenges.push({
                     player: challenge.playerName,
                     playerRank: challenge.playerRank,
                     opponent: opponentName,
                     opponentRank: challenge.opponent,
                     date: challenge.challengeDateStr,
-                    daysPast: Math.floor(challenge.daysDiff)
+                    daysPast: Math.floor(challenge.daysDiff),
+                    // Pair objects for challenge-thread teardown (§5.6).
+                    player1: { discordId: challengerRow[8], element: challengerRow[3] },
+                    player2: opponentRow ? { discordId: opponentRow[8], element: opponentRow[3] } : null
                 });
             }
 
@@ -251,6 +257,18 @@ module.exports = {
                 // (rankings) and the nullified pairs drop off the challenges board.
                 refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS);
                 refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.CHALLENGES);
+
+                // Archive each nullified pair's coordination thread (best-effort). §5.6.
+                for (const c of nullifiedChallenges) {
+                    if (!c.player2) continue;
+                    await archiveChallengeThread(
+                        interaction.client,
+                        ladder,
+                        c.player1,
+                        c.player2,
+                        '⏰ This challenge was auto-nullified (older than the time limit). Thread archived.'
+                    );
+                }
 
                 // Create embed message
                 const embed = new EmbedBuilder()

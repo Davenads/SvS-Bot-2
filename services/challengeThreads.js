@@ -140,8 +140,60 @@ async function createChallengeThread(
   }
 }
 
+// Archive (never delete — answer 3) the coordination thread for a resolved
+// challenge and drop the sidecar. The threadId is resolved from the sidecar, so
+// this works even at EXPIRY when the challenge value is already gone (the caller
+// passes the pair parsed from the key name). `player1`/`player2` need only
+// { discordId, element }. Best-effort — never throws.
+async function archiveChallengeThread(client, ladder, player1, player2, closingText) {
+  try {
+    const threadId = await redisClient.getChallengeThread(player1, player2, ladder);
+    if (!threadId) return; // No thread (pre-feature challenge, or creation failed).
+
+    const thread = await client.channels.fetch(threadId).catch(() => null);
+    if (thread) {
+      // Post the closing note while the thread is still active, then archive.
+      if (closingText) {
+        if (thread.archived) await thread.setArchived(false).catch(() => {});
+        await thread.send(closingText).catch(() => {});
+      }
+      await thread
+        .setArchived(true)
+        .catch(err => logError('Challenge threads: archive failed', err));
+    }
+
+    await redisClient.removeChallengeThread(player1, player2, ladder);
+  } catch (error) {
+    logError('Challenge threads: teardown failed', error);
+  }
+}
+
+// Keep the thread alive on /extendchallenge (answer 5): bump the sidecar TTL to
+// match the reset challenge lifetime and optionally post a note. The thread's
+// autoArchiveDuration is already the 7-day max, so nothing to bump there.
+async function persistChallengeThread(client, ladder, player1, player2, noteText) {
+  try {
+    const threadId = await redisClient.getChallengeThread(player1, player2, ladder);
+    if (!threadId) return;
+
+    await redisClient.refreshChallengeThreadTTL(player1, player2, ladder, THREAD_SIDECAR_TTL);
+
+    if (noteText) {
+      const thread = await client.channels.fetch(threadId).catch(() => null);
+      if (thread) {
+        if (thread.archived) await thread.setArchived(false).catch(() => {});
+        await thread.send(noteText).catch(() => {});
+      }
+    }
+  } catch (error) {
+    logError('Challenge threads: persist failed', error);
+  }
+}
+
 module.exports = {
   createChallengeThread,
+  archiveChallengeThread,
+  persistChallengeThread,
   THREAD_SIDECAR_TTL,
   pairFromRows,
   ladderTag,
