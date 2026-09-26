@@ -11,8 +11,8 @@
 //   D3 — Leave Ladder (self-serve removal via the shared removalService)
 //   D4 — Extended-Vacation requests (DM every SvS Manager; bench/insert stay
 //        manager-run — the buttons only notify, they never mutate the sheet)
-// Still stubbed (friendly ephemerals until their commit lands):
-//   Phase E — Sign Up (multi-step self-serve registration)
+//   E  — Sign Up (multi-step self-serve registration: ladder -> element ->
+//        build -> name/notes modal, with one-per-element-per-ladder guard)
 
 const {
   ActionRowBuilder,
@@ -20,6 +20,9 @@ const {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require('discord.js');
 const { logError } = require('../logger');
 const { LADDERS } = require('../config/ladders');
@@ -29,12 +32,16 @@ const {
   setCharacterStatus,
 } = require('../services/characterService');
 const { removeCharacterByRank } = require('../services/removalService');
+const { writeNewCharacter, getTakenElements } = require('../services/registrationService');
+const redisClient = require('../redis-client');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
 
 const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
 const specEmojiMap = { Vita: '❤️', ES: '🔵' };
 const MANAGER_ROLE_NAME = 'SvS Manager';
+const DUELER_ROLE_NAME = 'SvS Dueler';
+const ALL_ELEMENTS = ['Fire', 'Light', 'Cold'];
 const MAX_OPTIONS = 25;
 
 // Reply to the clicker privately. Works whether or not the interaction was
@@ -46,10 +53,13 @@ async function ephemeral(interaction, content) {
   return interaction.reply({ content, ephemeral: true });
 }
 
-const STUBS = {
-  signup:
-    '📝 **Sign Up** is coming soon. For now, ask an **SvS Manager** to run `/register` for you.',
-};
+// True only if the clicker holds the SvS Dueler role. Buttons/selects/modals
+// bypass the slash-command role gate in index.js, so the Sign Up flow re-checks
+// the role itself at both entry and submit.
+function hasDuelerRole(interaction) {
+  const role = interaction.guild?.roles.cache.find(r => r.name === DUELER_ROLE_NAME);
+  return role ? interaction.member.roles.cache.has(role.id) : false;
+}
 
 // A character-picker select whose option values encode `${ladderKey}:${rank}`,
 // so the follow-up handler can act without a channel/ladder lookup.
@@ -392,8 +402,233 @@ async function handleExtVacPick(interaction, requestType) {
   return sendExtVacRequest(interaction, requestType, char);
 }
 
+// --- Sign Up wizard --------------------------------------------------------
+// Step order: ladder select -> element select -> build select -> name/notes
+// modal -> write. Each step encodes its state in the next component's customId
+// so nothing is held server-side. The "one character per element per ladder"
+// rule is enforced both when listing elements and again at submit time.
+
+function ladderSelectRow() {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('svs:register:signup_fmt')
+      .setPlaceholder('Which ladder are you joining?')
+      .addOptions(
+        { label: 'HLD (Standard SvS)', value: 'main', emoji: '⚔️' },
+        { label: 'LLD (Low Level Dueling)', value: 'lld', emoji: '🛡️' }
+      )
+  );
+}
+
+function elementSelectRow(ladderKey, available) {
+  const opts = ALL_ELEMENTS.filter(e => available.includes(e)).map(e => ({
+    label: e,
+    value: e,
+    emoji: elementEmojiMap[e],
+  }));
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`svs:register:signup_elem:${ladderKey}`)
+      .setPlaceholder('Choose your element')
+      .addOptions(opts)
+  );
+}
+
+function buildSelectRow(ladderKey, element) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`svs:register:signup_build:${ladderKey}:${element}`)
+      .setPlaceholder('Choose your build')
+      .addOptions(
+        { label: 'Vita', value: 'Vita', emoji: '❤️' },
+        { label: 'ES (Energy Shield)', value: 'ES', emoji: '🔵' }
+      )
+  );
+}
+
+function signupModal(ladderKey, element, spec) {
+  const modal = new ModalBuilder()
+    .setCustomId(`svs:register:signup_submit:${ladderKey}:${element}:${spec}`)
+    .setTitle('Sign Up — Character Details');
+  const name = new TextInputBuilder()
+    .setCustomId('character_name')
+    .setLabel('Character Name')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(100);
+  const notes = new TextInputBuilder()
+    .setCustomId('notes')
+    .setLabel('Notes (optional)')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(500);
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(name),
+    new ActionRowBuilder().addComponents(notes)
+  );
+  return modal;
+}
+
+async function handleSignup(interaction) {
+  if (!hasDuelerRole(interaction)) {
+    return ephemeral(
+      interaction,
+      'You need the **SvS Dueler** role to sign up. Ask a mod to assign it, then try again.'
+    );
+  }
+  await interaction.deferReply({ ephemeral: true });
+  return interaction.editReply({
+    content: '📝 **Sign Up** — first, which ladder are you joining?',
+    components: [ladderSelectRow()],
+  });
+}
+
+async function handleSignupFmt(interaction) {
+  await interaction.deferUpdate();
+  const ladderKey = interaction.values[0];
+  const ladder = LADDERS[ladderKey];
+  if (!ladder) {
+    return interaction.editReply({ content: 'Unknown ladder.', components: [] });
+  }
+
+  let taken = [];
+  try {
+    taken = await getTakenElements(ladder, interaction.user.id);
+  } catch (error) {
+    logError('Signup: getTakenElements failed', error);
+    return interaction.editReply({
+      content: 'Could not check your existing characters. Please try again later.',
+      components: [],
+    });
+  }
+
+  const available = ALL_ELEMENTS.filter(e => !taken.includes(e));
+  if (!available.length) {
+    return interaction.editReply({
+      content: `You already have a character for every element on the **${ladder.displayName}** (one per element per ladder). Nothing to add here.`,
+      components: [],
+    });
+  }
+
+  return interaction.editReply({
+    content: `Joining **${ladder.displayName}** — choose your element:`,
+    components: [elementSelectRow(ladderKey, available)],
+  });
+}
+
+async function handleSignupElem(interaction, ctx) {
+  await interaction.deferUpdate();
+  const ladderKey = ctx.ladderKey;
+  const element = interaction.values[0];
+  if (!LADDERS[ladderKey]) {
+    return interaction.editReply({ content: 'Unknown ladder.', components: [] });
+  }
+  return interaction.editReply({
+    content: `${elementEmojiMap[element] || ''} **${element}** selected — now choose your build:`,
+    components: [buildSelectRow(ladderKey, element)],
+  });
+}
+
+async function handleSignupBuild(interaction, ctx) {
+  // showModal must be the FIRST response to this interaction — do NOT defer.
+  const ladderKey = ctx.ladderKey;
+  const element = ctx.extra[0];
+  const spec = interaction.values[0];
+  if (!LADDERS[ladderKey] || !element || !spec) {
+    return interaction.reply({
+      content: 'Something went wrong — please restart Sign Up.',
+      ephemeral: true,
+    });
+  }
+  return interaction.showModal(signupModal(ladderKey, element, spec));
+}
+
+async function handleSignupSubmit(interaction, ctx) {
+  await interaction.deferReply({ ephemeral: true });
+  if (!hasDuelerRole(interaction)) {
+    return interaction.editReply({ content: 'You need the **SvS Dueler** role to sign up.' });
+  }
+
+  const ladderKey = ctx.ladderKey;
+  const element = ctx.extra[0];
+  const spec = ctx.extra[1];
+  const ladder = LADDERS[ladderKey];
+  if (!ladder || !element || !spec) {
+    return interaction.editReply({ content: 'Something went wrong — please restart Sign Up.' });
+  }
+
+  const characterName = (interaction.fields.getTextInputValue('character_name') || '').trim();
+  const notes = (interaction.fields.getTextInputValue('notes') || '').trim();
+  if (!characterName) {
+    return interaction.editReply({ content: 'Character name is required.' });
+  }
+
+  const lockKey = `svs:signup:lock:${ladderKey}:${interaction.user.id}:${element}`;
+  const gotLock = await redisClient.acquireLock(lockKey, 30);
+  if (!gotLock) {
+    return interaction.editReply({
+      content: 'You already have a Sign Up in progress for that element — give it a moment.',
+    });
+  }
+
+  try {
+    // Re-validate one-per-element-per-ladder against the sheet (source of truth)
+    // in case another character was added between element pick and submit.
+    const taken = await getTakenElements(ladder, interaction.user.id);
+    if (taken.includes(element)) {
+      return interaction.editReply({
+        content: `You already have a **${element}** character on the **${ladder.displayName}** — only one per element per ladder is allowed.`,
+      });
+    }
+
+    const { rank } = await writeNewCharacter(interaction.client, ladder, {
+      characterName,
+      spec,
+      element,
+      discUser: interaction.user.username,
+      discUserId: interaction.user.id,
+      notes,
+    });
+
+    const embed = new EmbedBuilder()
+      .setColor(0xffa500)
+      .setTitle('✨ Welcome to the Ladder!')
+      .addFields(
+        { name: 'Character', value: `**${characterName}** (Rank #${rank})` },
+        { name: 'Ladder', value: ladder.displayName, inline: true },
+        {
+          name: 'Build',
+          value: `${specEmojiMap[spec] || ''} ${spec} ${elementEmojiMap[element] || ''} ${element}`.trim(),
+          inline: true,
+        },
+        { name: 'Notes', value: notes || 'None' }
+      )
+      .setFooter({ text: 'Status: Available • Good luck out there!' })
+      .setTimestamp();
+
+    return interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    logError('Signup: writeNewCharacter failed', error);
+    return interaction.editReply({
+      content: 'An error occurred while registering your character. Please try again later.',
+    });
+  } finally {
+    await redisClient.releaseLock(lockKey);
+  }
+}
+
 async function handle(interaction, ctx) {
   switch (ctx.action) {
+    case 'signup':
+      return handleSignup(interaction);
+    case 'signup_fmt':
+      return handleSignupFmt(interaction);
+    case 'signup_elem':
+      return handleSignupElem(interaction, ctx);
+    case 'signup_build':
+      return handleSignupBuild(interaction, ctx);
+    case 'signup_submit':
+      return handleSignupSubmit(interaction, ctx);
     case 'vacation':
       return handleVacation(interaction, 'to');
     case 'unvacation':
@@ -420,8 +655,6 @@ async function handle(interaction, ctx) {
     case 'unextvacpick':
       return handleExtVacPick(interaction, 'unextvac');
     default: {
-      const message = STUBS[ctx.action];
-      if (message) return ephemeral(interaction, message);
       logError('Register panel: unknown action', new Error(interaction.customId));
       return ephemeral(interaction, 'Unsupported action.');
     }
