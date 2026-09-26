@@ -9,8 +9,9 @@
 // Implemented so far:
 //   D2 — Request / Return from Vacation (self-serve status flips, below)
 //   D3 — Leave Ladder (self-serve removal via the shared removalService)
+//   D4 — Extended-Vacation requests (DM every SvS Manager; bench/insert stay
+//        manager-run — the buttons only notify, they never mutate the sheet)
 // Still stubbed (friendly ephemerals until their commit lands):
-//   D4 — Extended-Vacation buttons (DM the SvS Managers)
 //   Phase E — Sign Up (multi-step self-serve registration)
 
 const {
@@ -18,15 +19,22 @@ const {
   StringSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
 } = require('discord.js');
 const { logError } = require('../logger');
 const { LADDERS } = require('../config/ladders');
-const { findUserCharacters, setCharacterStatus } = require('../services/characterService');
+const {
+  findUserCharacters,
+  findUserVacationCharacters,
+  setCharacterStatus,
+} = require('../services/characterService');
 const { removeCharacterByRank } = require('../services/removalService');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
 
 const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
+const specEmojiMap = { Vita: '❤️', ES: '🔵' };
+const MANAGER_ROLE_NAME = 'SvS Manager';
 const MAX_OPTIONS = 25;
 
 // Reply to the clicker privately. Works whether or not the interaction was
@@ -41,10 +49,6 @@ async function ephemeral(interaction, content) {
 const STUBS = {
   signup:
     '📝 **Sign Up** is coming soon. For now, ask an **SvS Manager** to run `/register` for you.',
-  extvac:
-    '🏖️ **Extended Vacation** requests are coming soon. For now, ask an **SvS Manager** to run `/bench`.',
-  unextvac:
-    '🧳 **Return from Extended Vacation** is coming soon. For now, ask an **SvS Manager** to run `/insert`.',
 };
 
 // A character-picker select whose option values encode `${ladderKey}:${rank}`,
@@ -252,6 +256,142 @@ async function handleLeaveConfirm(interaction, ctx) {
   }
 }
 
+// Resolve the live members holding the SvS Manager role. Prefer the role's
+// cached members; only fall back to a full guild fetch if the cache is empty
+// (this action is infrequent, so the occasional fetch is acceptable).
+async function findManagerMembers(guild) {
+  const role = guild.roles.cache.find(r => r.name === MANAGER_ROLE_NAME);
+  if (!role) return [];
+  let members = role.members;
+  if (!members || members.size === 0) {
+    try {
+      await guild.members.fetch();
+    } catch (error) {
+      logError('Register panel: failed fetching guild members', error);
+    }
+    members = role.members;
+  }
+  return members ? [...members.values()].filter(m => !m.user.bot) : [];
+}
+
+// DM every SvS Manager about an extended-vacation request. Returns delivery
+// counts so the caller can tailor the confirmation. The buttons NEVER touch the
+// sheet — a manager runs /bench or /insert after seeing the DM.
+async function notifyManagers(interaction, requestType, char) {
+  const isBench = requestType === 'extvac';
+  const requester = interaction.user;
+  const build = `${specEmojiMap[char.spec] || ''} ${char.spec || ''} ${
+    elementEmojiMap[char.element] || ''
+  } ${char.element || ''}`.trim();
+  const command = isBench
+    ? `/bench rank:${char.rank} ladder:${char.ladderKey}`
+    : `/insert player_name:${char.name} ladder:${char.ladderKey}`;
+
+  const embed = new EmbedBuilder()
+    .setColor(isBench ? 0xffa500 : 0x4caf50)
+    .setTitle(isBench ? '🏖️ Extended Vacation Request' : '🧳 Return from Extended Vacation')
+    .setDescription(
+      `<@${requester.id}> (${requester.tag}) has requested ${
+        isBench ? 'extended vacation' : 'to return from extended vacation'
+      }.`
+    )
+    .addFields(
+      {
+        name: 'Character',
+        value: `**${char.name}** (Rank #${char.rank}, ${char.ladder.displayName})`,
+      },
+      { name: 'Build', value: build || 'Unknown', inline: true },
+      { name: 'Action needed', value: `Run \`${command}\`` }
+    )
+    .setTimestamp();
+
+  const managers = await findManagerMembers(interaction.guild);
+  let delivered = 0;
+  for (const m of managers) {
+    try {
+      await m.send({ embeds: [embed] });
+      delivered++;
+    } catch {
+      // Manager has DMs closed — skip; the confirmation reflects the shortfall.
+    }
+  }
+  return { delivered, total: managers.length };
+}
+
+// Deliver the request and reply to the caller with an outcome-aware message.
+async function sendExtVacRequest(interaction, requestType, char) {
+  const isBench = requestType === 'extvac';
+  const label = isBench ? 'extended vacation' : 'return from extended vacation';
+  const { delivered, total } = await notifyManagers(interaction, requestType, char);
+
+  let content;
+  if (total === 0) {
+    content = `⚠️ Your ${label} request for **${char.name}** was recorded, but no **SvS Manager** could be found. Please ping a manager directly.`;
+  } else if (delivered === 0) {
+    content = `⚠️ Couldn't DM any of the ${total} **SvS Manager${
+      total === 1 ? '' : 's'
+    }** (their DMs may be closed). Please ping a manager directly about your ${label} request for **${char.name}**.`;
+  } else {
+    content = `${isBench ? '🏖️' : '🧳'} Your ${label} request for **${char.name}** (Rank #${char.rank}, ${char.ladder.displayName}) was sent to ${delivered} **SvS Manager${
+      delivered === 1 ? '' : 's'
+    }**. They'll process it shortly.`;
+  }
+  return interaction.editReply({ content, components: [] });
+}
+
+// Extended-vacation request entry point.
+//   requestType 'extvac'   : bench an active ladder character  (uses /bench)
+//   requestType 'unextvac' : return a benched character        (uses /insert)
+async function handleExtVac(interaction, requestType) {
+  await interaction.deferReply({ ephemeral: true });
+  const isBench = requestType === 'extvac';
+  const chars = isBench
+    ? await findUserCharacters(interaction.user.id)
+    : await findUserVacationCharacters(interaction.user.id);
+
+  if (!chars.length) {
+    return interaction.editReply({
+      content: isBench
+        ? 'You have no active characters on the ladder to request extended vacation for.'
+        : 'You have no characters currently in Extended Vacation.',
+    });
+  }
+
+  if (chars.length === 1) {
+    return sendExtVacRequest(interaction, requestType, chars[0]);
+  }
+
+  const customId = isBench ? 'svs:register:extvacpick' : 'svs:register:unextvacpick';
+  const placeholder = isBench
+    ? 'Which character needs extended vacation?'
+    : 'Which character should return?';
+  return interaction.editReply({
+    content: 'You have multiple characters — pick one:',
+    components: [characterSelectRow(customId, placeholder, chars)],
+  });
+}
+
+// Follow-up after picking from the multi-character select.
+async function handleExtVacPick(interaction, requestType) {
+  await interaction.deferUpdate();
+  const [ladderKey, rank] = String(interaction.values[0]).split(':');
+  const isBench = requestType === 'extvac';
+  const chars = isBench
+    ? await findUserCharacters(interaction.user.id)
+    : await findUserVacationCharacters(interaction.user.id);
+  const char = chars.find(
+    c => c.ladderKey === ladderKey && String(c.rank) === String(rank)
+  );
+
+  if (!char) {
+    return interaction.editReply({
+      content: 'That character could no longer be found. Please try again.',
+      components: [],
+    });
+  }
+  return sendExtVacRequest(interaction, requestType, char);
+}
+
 async function handle(interaction, ctx) {
   switch (ctx.action) {
     case 'vacation':
@@ -271,6 +411,14 @@ async function handle(interaction, ctx) {
     case 'leavecancel':
       await interaction.deferUpdate();
       return interaction.editReply({ content: 'Cancelled — no changes made.', components: [] });
+    case 'extvac':
+      return handleExtVac(interaction, 'extvac');
+    case 'unextvac':
+      return handleExtVac(interaction, 'unextvac');
+    case 'extvacpick':
+      return handleExtVacPick(interaction, 'extvac');
+    case 'unextvacpick':
+      return handleExtVacPick(interaction, 'unextvac');
     default: {
       const message = STUBS[ctx.action];
       if (message) return ephemeral(interaction, message);

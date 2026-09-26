@@ -55,6 +55,42 @@ async function findUserCharacters(userId) {
   return found;
 }
 
+// Every character owned by `userId` currently parked in an Extended Vacation
+// tab, across all ladders. Used by the #register "Return from Extended Vacation"
+// button so the caller can point a manager at the right character. The vacation
+// tabs share the main A:K layout, but the row's rank is the ORIGINAL ladder rank
+// the player will be reinserted at (that is what `/insert` uses).
+async function findUserVacationCharacters(userId) {
+  const found = [];
+  for (const key of Object.keys(LADDERS)) {
+    const ladder = LADDERS[key];
+    let rows = [];
+    try {
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${ladder.vacationTab}!A2:K`,
+      });
+      rows = res.data.values || [];
+    } catch (error) {
+      logError(`characterService: failed reading ${ladder.vacationTab}`, error);
+      continue;
+    }
+    rows.forEach(row => {
+      if (row[8] === userId && row[1]) {
+        found.push({
+          ladderKey: ladder.key,
+          ladder,
+          rank: row[0],
+          name: row[1],
+          spec: row[2],
+          element: row[3],
+        });
+      }
+    });
+  }
+  return found;
+}
+
 // Write a single character's Status cell (column F).
 async function setCharacterStatus(ladder, rowNum, status) {
   await sheets.spreadsheets.values.update({
@@ -65,4 +101,4 @@ async function setCharacterStatus(ladder, rowNum, status) {
   });
 }
 
-module.exports = { findUserCharacters, setCharacterStatus };
+module.exports = { findUserCharacters, findUserVacationCharacters, setCharacterStatus };
