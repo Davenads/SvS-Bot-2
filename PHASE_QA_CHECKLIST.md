@@ -11,7 +11,7 @@ isolated test-guild channels are wired, so use throwaway/test characters.
 - [ ] Bot can post/edit in `#register`, `#hld-rankings`, `#lld-rankings`, `#challenges`, `#lld-challenges`.
 - [ ] Persistent panels are present (rankings board, register panel, both Active Challenges boards, Issue-a-Challenge button). If missing, restart the dyno — hydration reposts them.
 - [ ] Tester holds **SvS Dueler** (for signup); a second account with **SvS Manager** to verify manager DMs + manager paths.
-- [ ] Bot can post in the **vacation-approval channel** (`VACATION_APPROVAL_CHANNEL_ID` in `config/ladders.js`, currently defaults to the command-log channel `1165300795277848587`) and mention the **SvS Manager** role there.
+- [ ] Bot can post in the **vacation-approval channel** (`VACATION_APPROVAL_CHANNEL_ID` in `config/ladders.js`, currently defaults to the command-log channel `1165300795277848587`) and mention the **SvS Manager** role there. The thread action-button requests (dodge/extension/cancel) post to the same channel.
 
 ## 1. Rankings board (Phase B / F)
 - [ ] `#hld-rankings` shows Top 10 + "Open the full ladder in Google Sheets" link.
@@ -29,7 +29,7 @@ isolated test-guild channels are wired, so use throwaway/test characters.
 - [ ] **Issue a Challenge** → challenger select if >1 char, else straight to targets.
 - [ ] Target list only shows in-jump-range, non-vacation, non-challenged opponents.
 - [ ] Complete → ephemeral "Challenge issued!"; announcement embed posts in `#challenges`/`#lld-challenges` (not `#issue-a-challenge`).
-- [ ] `#issue-a-challenge` gets a **private thread** `⚔️ [HLD] A (#n) vs B (#m)`; both duelers + all SvS Managers pinged/added; pinned detail embed present.
+- [ ] `#issue-a-challenge` gets a **private thread** `⚔️ [HLD] A (#n) vs B (#m)`; both duelers + all SvS Managers pinged/added; pinned detail embed present, with 4 action buttons (Report Win, Request Dodge, Request Extension, Cancel Match).
 - [ ] Active Challenges board shows the pair with `⏳ expires in ~Xd Yh`.
 
 ## 4. Teardown paths (Phase G2)
@@ -37,6 +37,19 @@ isolated test-guild channels are wired, so use throwaway/test characters.
 - [ ] New challenge → `/cancelchallenge` → thread archived with cancel note.
 - [ ] New challenge → `/extendchallenge` → thread **persists** (extend note, no archive); board countdown resets.
 - [ ] (If practical) let one hit the 3-day TTL → expiry handler archives via sidecar even though the challenge value is gone.
+
+## 4b. Thread action buttons (matchPanel)
+- [ ] Buttons render for **everyone** in the thread (both duelers and managers) regardless of role — buttons always show; only the handler gates who can act.
+- [ ] **Report Win** as a participant → ephemeral "Who won?" 2-option select → confirm step → on confirm the result resolves (rank swap on a climb, cooldown, announcement embed posts in the ladder's challenges channel, thread archived) and the reply shows the outcome. A non-participant / non-manager → "Only a participant or an SvS Manager can report."
+- [ ] Report Win **Cancel** button on the confirm step → "Cancelled — no result reported", no write.
+- [ ] **Request Dodge** as a participant → ephemeral "sent to the SvS Managers"; a single Approve/Deny post lands in the approval channel (pings the manager role), listing the requester, opponent, and dodge target (the opponent).
+- [ ] Approve a dodge request → opponent's dodge count (col K) increments by 1; approval post loses its buttons and shows "Approved by …"; requester gets a DM.
+- [ ] **Request Extension** → on approve both rows' challenge date moves +2 days, the Redis challenge + thread TTL bump, the challenges board countdown resets, requester DM'd.
+- [ ] **Cancel Match** → on approve both rows reset to Available (F:H cleared), Redis challenge removed, thread archived with a cancel note, boards refresh, requester DM'd.
+- [ ] **Deny** on any request → no sheet change; requester gets a decline DM; post shows "Denied by …" with buttons removed.
+- [ ] **Double-approve guard**: a second manager clicking the same request post while the first is processing → "Another manager is already handling this request" (short Redis lock on the message id); no double write.
+- [ ] **Non-manager** clicks Approve/Deny on a request post → ephemeral "Only SvS Managers can act…"; the post is untouched.
+- [ ] **Click after resolution**: any thread button clicked after the match already resolved/expired → graceful "This challenge is no longer active" (no crash, no write).
 
 ## 5. Register writes (Phase D)
 - [ ] **Request Vacation** (Available char) → sheet is **not** mutated yet; caller sees "sent to the SvS Managers for approval"; a single Approve/Deny post lands in the approval channel (pings the SvS Manager role). **Return from Vacation** stays self-serve → flips 🌴 back to ✅ instantly.
