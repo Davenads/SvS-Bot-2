@@ -8,6 +8,8 @@ const { logError } = require('../logger')
 const { getGoogleAuth } = require('../fixGoogleAuth')
 const { getLadderFromChannel } = require('../utils/ladder')
 const { resolveMatch } = require('../services/matchResult')
+const { LADDERS, SHARED_CHALLENGE_CHANNEL_ID } = require('../config/ladders')
+const redisClient = require('../redis-client')
 
 // Initialize the Google Sheets API client (used only for the read below;
 // the resolution/write path lives in services/matchResult.js).
@@ -17,6 +19,30 @@ const sheets = google.sheets({
 })
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
+
+// Reverse-resolve which ladder a coordination thread belongs to, from its id.
+// The shared issue-a-challenge channel is not ladder-resolvable by channel id,
+// so /reportwin run inside a thread finds its ladder via the challenge-thread
+// Redis sidecar (key: challenge-thread:{redisPrefix}:{pair}). Returns the ladder
+// object or null.
+async function resolveThreadLadder (threadId) {
+  try {
+    const keys = await redisClient.listChallengeThreadKeys()
+    for (const key of keys) {
+      const value = await redisClient.getChallengeThreadValue(key)
+      if (value && String(value) === String(threadId)) {
+        const prefix = key.split(':')[1]
+        const ladderKey = Object.keys(LADDERS).find(
+          k => LADDERS[k].redisPrefix === prefix
+        )
+        if (ladderKey) return LADDERS[ladderKey]
+      }
+    }
+  } catch (error) {
+    logError('reportwin: resolveThreadLadder failed', error)
+  }
+  return null
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -38,11 +64,22 @@ module.exports = {
   async execute (interaction) {
     // Infer the ladder from the channel the command was run in. The standard
     // SvS challenge channel resolves to main; the LLD challenge channel resolves
-    // to lld. Any other channel is rejected.
-    const ladder = getLadderFromChannel(interaction.channelId)
+    // to lld. If run inside a challenge coordination thread in the shared
+    // issue-a-challenge channel (not resolvable by channel id), reverse-resolve
+    // the ladder from the thread's Redis sidecar. Any other channel is rejected.
+    let ladder = getLadderFromChannel(interaction.channelId)
+    if (
+      !ladder &&
+      interaction.channel &&
+      typeof interaction.channel.isThread === 'function' &&
+      interaction.channel.isThread() &&
+      interaction.channel.parentId === SHARED_CHALLENGE_CHANNEL_ID
+    ) {
+      ladder = await resolveThreadLadder(interaction.channelId)
+    }
     if (!ladder) {
       return await interaction.reply({
-        content: 'This command can only be used in a challenge channel.',
+        content: 'This command can only be used in a challenge channel or a challenge thread.',
         ephemeral: true
       })
     }
@@ -96,6 +133,22 @@ module.exports = {
         })
       }
 
+      // When invoked inside a thread, announce to the ladder's public challenge
+      // channel (the thread is archived on resolve, so an in-thread announcement
+      // would be low-visibility); otherwise post in the current channel.
+      let announceChannel = interaction.channel
+      if (
+        interaction.channel &&
+        typeof interaction.channel.isThread === 'function' &&
+        interaction.channel.isThread() &&
+        ladder.challengeChannelId
+      ) {
+        const publicChannel = await interaction.client.channels
+          .fetch(ladder.challengeChannelId)
+          .catch(() => null)
+        if (publicChannel) announceChannel = publicChannel
+      }
+
       // Delegate the full resolution (rank swap, Redis clear + cooldown, thread
       // archive, title-defend metrics, announcement embed, board refresh) to the
       // shared service so /reportwin and the vacation-forfeit path stay identical.
@@ -103,7 +156,7 @@ module.exports = {
         rows,
         winnerRow,
         loserRow,
-        announceChannel: interaction.channel
+        announceChannel
       })
 
       // Confirm to command user
