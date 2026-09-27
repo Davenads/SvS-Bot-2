@@ -15,7 +15,7 @@
 // Every function is best-effort: a thread failure is logged and swallowed so it
 // never blocks the sheet/Redis writes that already recorded the challenge.
 
-const { EmbedBuilder, ChannelType } = require('discord.js');
+const { EmbedBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const redisClient = require('../redis-client');
 const { logError } = require('../logger');
 const { SHARED_CHALLENGE_CHANNEL_ID } = require('../config/ladders');
@@ -53,8 +53,12 @@ function detailEmbed(ladder, challengerRow, targetRow, challengerRank, targetRan
     .setColor(0x00ae86)
     .setTitle(`⚔️ ${ladderTag(ladder)} Challenge — Coordination Thread`)
     .setDescription(
-      'Use this thread to coordinate your match (times, games, etc.). ' +
-      'When you\'re done, report the result with `/reportwin` in your challenges channel.'
+      'Use this thread to coordinate your match (times, games, etc.), then use the buttons below:\n' +
+      '• **Report Win** — either player self-reports; pick the winner and confirm.\n' +
+      '• **Request Dodge** — opponent didn\'t show? Ask a manager to record a dodge.\n' +
+      '• **Request Extension** — ask a manager for 2 extra days.\n' +
+      '• **Cancel Match** — ask a manager to void the match (no rank change).\n' +
+      'The thread is archived automatically once a result is reported or the match is cancelled.'
     )
     .addFields(
       {
@@ -72,6 +76,33 @@ function detailEmbed(ladder, challengerRow, targetRow, challengerRank, targetRan
     )
     .setFooter({ text: 'Challenge expires in 3 days.' })
     .setTimestamp();
+}
+
+// Action buttons pinned under the detail embed. The shared #issue-a-challenge
+// channel isn't ladder-resolvable, so each button encodes the ladder key + both
+// duelers' identities (discordId:element). Handlers live in
+// interactions/matchPanel.js. Report Win is self-serve; the other three post a
+// manager Approve/Deny request.
+function actionButtonsRow(ladder, challengerRow, targetRow) {
+  const pair = `${ladder.key}:${challengerRow[8]}:${challengerRow[3]}:${targetRow[8]}:${targetRow[3]}`;
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`svs:match:report:${pair}`)
+      .setLabel('Report Win')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`svs:match:dodge:${pair}`)
+      .setLabel('Request Dodge')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`svs:match:extend:${pair}`)
+      .setLabel('Request Extension')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`svs:match:cancel:${pair}`)
+      .setLabel('Cancel Match')
+      .setStyle(ButtonStyle.Danger)
+  );
 }
 
 // Create a private coordination thread, add both duelers + all SvS Managers,
@@ -135,6 +166,7 @@ async function createChallengeThread(
       const msg = await thread.send({
         content: mentionLine || undefined,
         embeds: [detailEmbed(ladder, challengerRow, targetRow, challengerRank, targetRank, challengeDate)],
+        components: [actionButtonsRow(ladder, challengerRow, targetRow)],
         allowedMentions: {
           roles: managerRole ? [managerRole.id] : [],
           users: duelerIds,

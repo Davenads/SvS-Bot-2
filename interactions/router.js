@@ -24,6 +24,7 @@ const handlers = {
   rankings: require('./rankingsPanel'),
   challenges: require('./challengesPanel'),
   register: require('./registerPanel'),
+  match: require('./matchPanel'),
 };
 
 function parseCustomId(customId) {
