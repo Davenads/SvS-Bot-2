@@ -20,7 +20,7 @@ const redisClient = require('../redis-client');
 const { logError } = require('../logger');
 const { SHARED_CHALLENGE_CHANNEL_ID } = require('../config/ladders');
 const { specEmojiMap, elementEmojiMap } = require('../config/emoji');
-const { findManagerMembers } = require('../utils/managers');
+const { findManagerMembers, findManagerRole } = require('../utils/managers');
 
 // Sidecar lives longer than the challenge (~3 days) so teardown can still
 // resolve the thread at/after expiry. 4 days gives a full day of margin.
@@ -102,7 +102,11 @@ async function createChallengeThread(
       reason: `Challenge thread: ${ladder.displayName}`,
     });
 
-    // Add both duelers + every SvS Manager. Adding a member pings them (answer 1).
+    // Add both duelers + every SvS Manager. Private threads require EXPLICIT
+    // membership, so each is added directly (adding a member pings them, answer
+    // 1). The manager roster is freshly fetched inside findManagerMembers, so no
+    // manager is missed — the old cache-only lookup dropped uncached managers.
+    const managerRole = findManagerRole(channel.guild);
     const memberIds = new Set([challengerRow[8], targetRow[8]]);
     try {
       const managers = await findManagerMembers(channel.guild);
@@ -118,9 +122,23 @@ async function createChallengeThread(
     }
 
     // Pinned challenge-detail embed (no buttons — coordination only, answer 2).
+    // The message also tags the SvS Manager ROLE for one clean, visible ping
+    // (reaching any manager the explicit add missed) plus both duelers.
     try {
+      const duelerIds = [challengerRow[8], targetRow[8]].filter(Boolean);
+      const mentionLine = [
+        managerRole ? `<@&${managerRole.id}>` : '',
+        duelerIds.map(id => `<@${id}>`).join(' '),
+      ]
+        .filter(Boolean)
+        .join(' ');
       const msg = await thread.send({
+        content: mentionLine || undefined,
         embeds: [detailEmbed(ladder, challengerRow, targetRow, challengerRank, targetRank, challengeDate)],
+        allowedMentions: {
+          roles: managerRole ? [managerRole.id] : [],
+          users: duelerIds,
+        },
       });
       await msg.pin().catch(() => {});
     } catch (error) {

@@ -7,22 +7,33 @@ const { logError } = require('../logger');
 
 const MANAGER_ROLE_NAME = 'SvS Manager';
 
-// Return every non-bot member holding the SvS Manager role. Falls back to a full
-// guild member fetch when the role's member cache is empty (large guilds don't
-// cache every member up front). Returns [] if the role doesn't exist.
+// Resolve the SvS Manager role from the guild's ROLE cache. Roles are cached in
+// full (unlike members), so a name lookup here is reliable. Returns null if the
+// role doesn't exist.
+function findManagerRole(guild) {
+  return guild.roles.cache.find(r => r.name === MANAGER_ROLE_NAME) || null;
+}
+
+// Return every non-bot member holding the SvS Manager role.
+//
+// `role.members` is derived from the guild MEMBER cache, which on an active
+// guild is only PARTIALLY populated (Discord only gossips recently-active
+// members). The previous guard refetched ONLY when that cache was completely
+// empty, so a partial cache returned a partial roster — silently dropping the
+// uncached managers (the "~80% of managers" bug in thread membership and the
+// extended-vacation DMs). We now ALWAYS fetch the full member list first so the
+// roster is complete. These lookups fire on infrequent events (challenge
+// creation, extended-vacation requests), so the fetch cost is acceptable.
 async function findManagerMembers(guild) {
-  const role = guild.roles.cache.find(r => r.name === MANAGER_ROLE_NAME);
+  const role = findManagerRole(guild);
   if (!role) return [];
-  let members = role.members;
-  if (!members || members.size === 0) {
-    try {
-      await guild.members.fetch();
-    } catch (error) {
-      logError('findManagerMembers: failed fetching guild members', error);
-    }
-    members = role.members;
+  try {
+    await guild.members.fetch();
+  } catch (error) {
+    logError('findManagerMembers: failed fetching guild members', error);
   }
+  const members = role.members;
   return members ? [...members.values()].filter(m => !m.user.bot) : [];
 }
 
-module.exports = { findManagerMembers, MANAGER_ROLE_NAME };
+module.exports = { findManagerMembers, findManagerRole, MANAGER_ROLE_NAME };
