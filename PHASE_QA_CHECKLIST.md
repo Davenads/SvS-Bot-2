@@ -11,6 +11,7 @@ isolated test-guild channels are wired, so use throwaway/test characters.
 - [ ] Bot can post/edit in `#register`, `#hld-rankings`, `#lld-rankings`, `#challenges`, `#lld-challenges`.
 - [ ] Persistent panels are present (rankings board, register panel, both Active Challenges boards, Issue-a-Challenge button). If missing, restart the dyno — hydration reposts them.
 - [ ] Tester holds **SvS Dueler** (for signup); a second account with **SvS Manager** to verify manager DMs + manager paths.
+- [ ] Bot can post in the **vacation-approval channel** (`VACATION_APPROVAL_CHANNEL_ID` in `config/ladders.js`, currently defaults to the command-log channel `1165300795277848587`) and mention the **SvS Manager** role there.
 
 ## 1. Rankings board (Phase B / F)
 - [ ] `#hld-rankings` shows Top 10 + "Open the full ladder in Google Sheets" link.
@@ -38,11 +39,22 @@ isolated test-guild channels are wired, so use throwaway/test characters.
 - [ ] (If practical) let one hit the 3-day TTL → expiry handler archives via sidecar even though the challenge value is gone.
 
 ## 5. Register writes (Phase D)
-- [ ] **Request Vacation** (Available char) → flips to 🌴; board shows Vacation. **Return from Vacation** → back to ✅.
+- [ ] **Request Vacation** (Available char) → sheet is **not** mutated yet; caller sees "sent to the SvS Managers for approval"; a single Approve/Deny post lands in the approval channel (pings the SvS Manager role). **Return from Vacation** stays self-serve → flips 🌴 back to ✅ instantly.
 - [ ] Multi-char account → picker appears and acts on the chosen one only.
 - [ ] **Leave Ladder** → confirm step → removal re-ranks everyone below; board + challenges update. Cancel makes no changes.
 - [ ] **Request Extended Vacation** → every SvS Manager gets a DM with the exact `/bench …` command; sheet is **not** mutated. **Return from Extended Vacation** → DM with `/insert …`.
 - [ ] Manager with DMs closed → caller gets the "couldn't DM" fallback, not a crash.
+
+## 5b. Vacation approval + forfeit (Phase 3 / 4)
+- [ ] **Approve** an Available-char request → status flips to 🌴; `#…-rankings` updates; requester gets an approval DM; the mod post loses its buttons and shows "✅ Approved by …".
+- [ ] **Deny** a request → no sheet change; requester gets a decline DM; post shows "❌ Denied by …" with buttons removed.
+- [ ] **Second manager clicks** an already-actioned post → "Already handled — no action taken." (no double write).
+- [ ] **Non-manager clicks** Approve/Deny → ephemeral "Only SvS Managers can act…"; the post is untouched.
+- [ ] **Request Vacation while in a Challenge** → the eligible list includes the Challenge char; the approval embed shows the **⚠️ Active Challenge** forfeit warning.
+- [ ] **Approve a mid-challenge request** → opponent is awarded the win (result embed posts in `#…-challenges`, ranks swap on a climb, thread archived, cooldown set), THEN the requester's char lands on 🌴 at its (possibly new) rank; approval note + DM append "…forfeited — {opponent} was awarded the win."
+- [ ] **Challenge resolved before approval** (e.g. `/reportwin` first) → approve does **not** double-forfeit; char just goes 🌴.
+- [ ] **`/bench` a mid-challenge player** → opponent gets the win (forfeit result announced), then the player is moved to Extended Vacation and ranks re-number correctly (benched player located by identity, not stale rank).
+- [ ] Duplicate request → second **Request Vacation** for the same char before approval → "you already have a pending vacation request."
 
 ## 6. Resilience spot-checks
 - [ ] Delete a persistent board message manually → next mutation or the ~10-min safety sweep reposts it.

@@ -197,7 +197,7 @@ existing pattern (`challengeService`, `registrationService`, `removalService`).
 | **2** | C-0: extract `resolveMatch`, rewire `/reportwin` (no behavior change) | Low — refactor | ✅ done |
 | **3** | B: label revert + request/approval flow + Redis pending key | Medium | ✅ done |
 | **4** | C-1: allow Challenge-status requests + forfeit on approve + `/bench` auto-forfeit | Medium | ✅ done |
-| **5** | QA pass (extend `PHASE_QA_CHECKLIST.md`) | — | pending |
+| **5** | QA pass (extend `PHASE_QA_CHECKLIST.md`) | — | ✅ done |
 
 ## QA checklist (add to PHASE_QA_CHECKLIST.md)
 - [ ] New challenge thread pings the **role**; **every** manager lands in the
