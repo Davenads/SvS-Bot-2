@@ -2,57 +2,21 @@
 require('dotenv').config()
 
 // Import necessary modules
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js')
+const { SlashCommandBuilder } = require('discord.js')
 const { google } = require('googleapis')
 const { logError } = require('../logger')
-const redisClient = require('../redis-client');
-const { getGoogleAuth } = require('../fixGoogleAuth');
-const { getLadderFromChannel } = require('../utils/ladder');
-const { refreshDashboard } = require('../dashboards/refresh');
-const { DASHBOARD_PANELS } = require('../config/ladders');
-const { archiveChallengeThread } = require('../services/challengeThreads');
+const { getGoogleAuth } = require('../fixGoogleAuth')
+const { getLadderFromChannel } = require('../utils/ladder')
+const { resolveMatch } = require('../services/matchResult')
 
-// Initialize the Google Sheets API client
+// Initialize the Google Sheets API client (used only for the read below;
+// the resolution/write path lives in services/matchResult.js).
 const sheets = google.sheets({
   version: 'v4',
   auth: getGoogleAuth()
-});
+})
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID
-
-// Emoji and color mappings for visual enhancement
-const elementEmojis = {
-  Fire: '🔥',
-  Light: '⚡',
-  Cold: '❄️'
-}
-
-const specEmojis = {
-  Vita: '❤️',
-  ES: '🔵'
-}
-
-const elementColors = {
-  Fire: { red: 0.976, green: 0.588, blue: 0.51 }, // #f99682
-  Light: { red: 1, green: 0.925, blue: 0.682 }, // #ffecae
-  Cold: { red: 0.498, green: 0.631, blue: 1 } // #7fa1ff
-}
-
-// Victory messages for different scenarios
-const victoryMessages = {
-  defense: [
-    'defended their position with unwavering resolve! 🛡️',
-    'stood their ground magnificently! ⚔️',
-    'proved why they earned their rank! 🏆',
-    'successfully protected their standing! 🛡️'
-  ],
-  climb: [
-    'climbed the ranks with an impressive victory! 🏔️',
-    'proved their worth and ascended! ⚡',
-    'showed they deserve a higher position! 🌟',
-    'conquered new heights in the ladder! 🎯'
-  ]
-}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -118,13 +82,11 @@ module.exports = {
         return interaction.editReply({ content: 'Invalid ranks provided.' })
       }
 
-      // Permission check
+      // Permission check — a participant or an SvS Manager may report.
       const userId = interaction.user.id
-      const winnerDiscordId = winnerRow[8]
-      const loserDiscordId = loserRow[8]
       const hasPermission =
-        userId === winnerDiscordId ||
-        userId === loserDiscordId ||
+        userId === winnerRow[8] ||
+        userId === loserRow[8] ||
         interaction.member.roles.cache.some(role => role.name === 'SvS Manager')
 
       if (!hasPermission) {
@@ -134,342 +96,15 @@ module.exports = {
         })
       }
 
-      console.log('├─ Processing match result...')
-
-      // Store player details
-      const winnerDetails = {
-        name: winnerRow[1],
-        discordName: winnerRow[4],
-        element: winnerRow[3],
-        spec: winnerRow[2]
-      }
-
-      const loserDetails = {
-        name: loserRow[1],
-        discordName: loserRow[4],
-        element: loserRow[3],
-        spec: loserRow[2]
-      }
-
-      const isDefense = winnerRank < loserRank
-      console.log(`├─ Match Type: ${isDefense ? 'Defense' : 'Climb'}`)
-
-      // Prepare row updates
-      let updatedWinnerRow = [...winnerRow]
-      let updatedLoserRow = [...loserRow]
-
-      if (!isDefense) {
-        // Swap rows for climb victory
-        console.log('├─ Performing rank swap...')
-        updatedWinnerRow = [...loserRow]
-        updatedWinnerRow[0] = String(winnerRow[0])
-
-        updatedLoserRow = [...winnerRow]
-        updatedLoserRow[0] = String(loserRow[0])
-
-        // Swap Notes and Cooldown
-        ;[updatedWinnerRow[9], updatedLoserRow[9]] = [loserRow[9], winnerRow[9]]
-        ;[updatedWinnerRow[10], updatedLoserRow[10]] = [
-          loserRow[10],
-          winnerRow[10]
-        ]
-      } else {
-        updatedWinnerRow[0] = String(updatedWinnerRow[0])
-        updatedLoserRow[0] = String(updatedLoserRow[0])
-      }
-
-      // Reset challenge status
-      updatedWinnerRow[5] = 'Available'
-      updatedWinnerRow[6] = ''
-      updatedWinnerRow[7] = ''
-      updatedLoserRow[5] = 'Available'
-      updatedLoserRow[6] = ''
-      updatedLoserRow[7] = ''
-
-      const winnerRowIndex =
-        rows.findIndex(row => parseInt(row[0]) === winnerRank) + 2
-      const loserRowIndex =
-        rows.findIndex(row => parseInt(row[0]) === loserRank) + 2
-
-      // Create update requests
-      console.log('├─ Preparing update requests...')
-      const requests = [
-        {
-          updateCells: {
-            range: {
-              sheetId: ladder.sheetId,
-              startRowIndex: winnerRowIndex - 1,
-              endRowIndex: winnerRowIndex,
-              startColumnIndex: 0,
-              endColumnIndex: 11
-            },
-            rows: [
-              {
-                values: updatedWinnerRow.map((cellValue, index) => ({
-                  userEnteredValue: { stringValue: cellValue },
-                  userEnteredFormat:
-                    index === 0 ? { horizontalAlignment: 'RIGHT' } : {}
-                }))
-              }
-            ],
-            fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
-          }
-        },
-        {
-          updateCells: {
-            range: {
-              sheetId: ladder.sheetId,
-              startRowIndex: loserRowIndex - 1,
-              endRowIndex: loserRowIndex,
-              startColumnIndex: 0,
-              endColumnIndex: 11
-            },
-            rows: [
-              {
-                values: updatedLoserRow.map((cellValue, index) => ({
-                  userEnteredValue: { stringValue: cellValue },
-                  userEnteredFormat:
-                    index === 0 ? { horizontalAlignment: 'RIGHT' } : {}
-                }))
-              }
-            ],
-            fields: 'userEnteredValue,userEnteredFormat.horizontalAlignment'
-          }
-        }
-      ]
-
-      // Add element color updates
-      const elementUpdateRequests = [
-        {
-          updateCells: {
-            range: {
-              sheetId: ladder.sheetId,
-              startRowIndex: winnerRowIndex - 1,
-              endRowIndex: winnerRowIndex,
-              startColumnIndex: 3,
-              endColumnIndex: 4
-            },
-            rows: [
-              {
-                values: [
-                  {
-                    userEnteredFormat: {
-                      backgroundColor: elementColors[updatedWinnerRow[3]]
-                    }
-                  }
-                ]
-              }
-            ],
-            fields: 'userEnteredFormat.backgroundColor'
-          }
-        },
-        {
-          updateCells: {
-            range: {
-              sheetId: ladder.sheetId,
-              startRowIndex: loserRowIndex - 1,
-              endRowIndex: loserRowIndex,
-              startColumnIndex: 3,
-              endColumnIndex: 4
-            },
-            rows: [
-              {
-                values: [
-                  {
-                    userEnteredFormat: {
-                      backgroundColor: elementColors[updatedLoserRow[3]]
-                    }
-                  }
-                ]
-              }
-            ],
-            fields: 'userEnteredFormat.backgroundColor'
-          }
-        }
-      ]
-
-      // Execute updates
-      console.log('├─ Executing sheet updates...')
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: SPREADSHEET_ID,
-        resource: { requests: [...requests, ...elementUpdateRequests] }
+      // Delegate the full resolution (rank swap, Redis clear + cooldown, thread
+      // archive, title-defend metrics, announcement embed, board refresh) to the
+      // shared service so /reportwin and the vacation-forfeit path stay identical.
+      const { isDefense } = await resolveMatch(interaction.client, ladder, {
+        rows,
+        winnerRow,
+        loserRow,
+        announceChannel: interaction.channel
       })
-
-      // Remove challenge from Redis (if it exists)
-      try {
-        const winnerPlayer = {
-          discordId: winnerRow[8],
-          element: winnerRow[3]
-        };
-        const loserPlayer = {
-          discordId: loserRow[8],
-          element: loserRow[3]
-        };
-        await redisClient.removeChallenge(winnerPlayer, loserPlayer, ladder);
-        console.log('├─ Removed challenge from Redis tracking');
-        // Archive the coordination thread (best-effort; fire-and-forget so the
-        // thread I/O never delays the report reply — it swallows its own errors,
-        // matching the non-awaited dashboard refresh). §5.6.
-        archiveChallengeThread(
-          interaction.client,
-          ladder,
-          winnerPlayer,
-          loserPlayer,
-          `⚔️ Result reported — **${winnerDetails.name}** (#${winnerRank}) defeated **${loserDetails.name}** (#${loserRank}). Thread archived.`
-        );
-      } catch (error) {
-        console.error('Error removing challenge from Redis:', error);
-        // Continue with the report even if Redis removal fails
-      }
-
-      // Create result announcement embed
-      const victoryMessage = isDefense
-        ? victoryMessages.defense[
-            Math.floor(Math.random() * victoryMessages.defense.length)
-          ]
-        : victoryMessages.climb[
-            Math.floor(Math.random() * victoryMessages.climb.length)
-          ]
-
-      // Add this new code block for title defends before the embed creation
-      const titleDefendModeEnabled = await redisClient.getTitleDefendMode(ladder);
-      if (winnerRank === 1 && !titleDefendModeEnabled) {
-        console.log('├─ Title defend tracking disabled — skipping Metrics update');
-      }
-      if (winnerRank === 1 && titleDefendModeEnabled) {
-        console.log('Processing title defense metrics...')
-
-        try {
-          // Fetch current metrics data (C = current-season defends, D = all-time)
-          const metricsResult = await sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEET_ID,
-            range: `${ladder.metricsTab}!A11:D`
-          })
-
-          const metricsRows = metricsResult.data.values || []
-
-          // Find if player already exists
-          const playerRowIndex = metricsRows.findIndex(
-            row => row[1] === winnerRow[8]
-          ) // Use winnerRow[8] directly for Discord ID
-
-          if (playerRowIndex === -1) {
-            // New player - append to the list (season + all-time both start at 1)
-            await sheets.spreadsheets.values.append({
-              spreadsheetId: SPREADSHEET_ID,
-              range: `${ladder.metricsTab}!A11:D`,
-              valueInputOption: 'USER_ENTERED',
-              resource: {
-                values: [
-                  [
-                    winnerRow[4], // Discord Username
-                    winnerRow[8], // Discord ID
-                    '1', // Current-season defends
-                    '1' // All-time defends
-                  ]
-                ]
-              }
-            })
-            console.log('New title defender added to metrics')
-          } else {
-            // Existing player - increment BOTH current-season (C) and all-time (D)
-            const seasonDefenses =
-              parseInt(metricsRows[playerRowIndex][2] || '0') + 1
-            const allTimeDefenses =
-              parseInt(metricsRows[playerRowIndex][3] || '0') + 1
-            await sheets.spreadsheets.values.update({
-              spreadsheetId: SPREADSHEET_ID,
-              range: `${ladder.metricsTab}!A${11 + playerRowIndex}:D${11 + playerRowIndex}`,
-              valueInputOption: 'USER_ENTERED',
-              resource: {
-                values: [
-                  [
-                    winnerRow[4], // Discord Username
-                    winnerRow[8], // Discord ID
-                    seasonDefenses.toString(),
-                    allTimeDefenses.toString()
-                  ]
-                ]
-              }
-            })
-            console.log('Existing title defender metrics updated')
-          }
-        } catch (error) {
-          console.error('Error updating title defense metrics:', error)
-        }
-      }
-      // Set the cooldown for both players
-      const player1 = {
-        discordId: winnerRow[8],
-        element: winnerRow[3]
-      }
-
-      const player2 = {
-        discordId: loserRow[8],
-        element: loserRow[3]
-      }
-
-      // Set cooldown in Redis
-      try {
-        await redisClient.setCooldown(player1, player2, ladder)
-        console.log('Cooldown set successfully for match:', {
-          winner: player1.discordId,
-          loser: player2.discordId
-        })
-      } catch (cooldownError) {
-        console.error('Error setting cooldown:', cooldownError)
-        // Don't throw error here - continue with match reporting even if cooldown fails
-      }
-      const resultEmbed = new EmbedBuilder()
-        .setColor(0xffa500)
-        .setTitle('⚔️ Challenge Result Announced! ⚔️')
-        .setDescription(`**${winnerDetails.name}** ${victoryMessage}`)
-        .addFields(
-          {
-            name: `${
-              isDefense ? '🛡️ Defender' : '🏆 Victor'
-            } (Rank #${winnerRank})`,
-            value: `**${winnerDetails.name}**
-${specEmojis[winnerDetails.spec]} ${winnerDetails.spec} ${
-              elementEmojis[winnerDetails.element]
-            }
-<@${winnerDiscordId}>`,
-            inline: true
-          },
-          {
-            name: '⚔️',
-            value: 'VS',
-            inline: true
-          },
-          {
-            name: `${
-              isDefense ? '⚔️ Challenger' : '📉 Defeated'
-            } (Rank #${loserRank})`,
-            value: `**${loserDetails.name}**
-${specEmojis[loserDetails.spec]} ${loserDetails.spec} ${
-              elementEmojis[loserDetails.element]
-            }
-<@${loserDiscordId}>`,
-            inline: true
-          }
-        )
-        .setFooter({
-          text: `${
-            isDefense
-              ? 'Rank Successfully Defended!'
-              : 'Ranks have been updated!'
-          }`,
-          iconURL: interaction.client.user.displayAvatarURL()
-        })
-        .setTimestamp()
-
-      // Send result to channel
-      await interaction.channel.send({ embeds: [resultEmbed] })
-
-      // Refresh the live boards: ranks may have swapped (rankings) and the
-      // challenge just resolved (active challenges).
-      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.RANKINGS)
-      refreshDashboard(interaction.client, ladder.key, DASHBOARD_PANELS.CHALLENGES)
 
       // Confirm to command user
       await interaction.editReply({
