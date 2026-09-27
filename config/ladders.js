@@ -82,6 +82,12 @@ const LADDER_CHOICES = [
 const SHARED_REGISTER_CHANNEL_ID = '1553201835026681976';  // #register (bot-only panel)
 const SHARED_CHALLENGE_CHANNEL_ID = '1553197193849081977'; // #issue-a-challenge
 
+// Channel where the SINGLE Approve/Deny post for each vacation request lands so
+// any SvS Manager can action it (VACATION_APPROVAL_AND_THREAD_FIX_PLAN.md §B).
+// TODO(mods): point this at a dedicated mod-approval channel. It currently
+// defaults to the existing command-log channel so the flow works out of the box.
+const VACATION_APPROVAL_CHANNEL_ID = '1165300795277848587';
+
 // Hidden tab that durably maps each dashboard panel to the (channel, message)
 // the bot edits in place, so a restart reconciles state instead of reposting.
 // Columns A->E: Ladder | Panel | Channel ID | Message ID | Last Updated.
@@ -110,6 +116,7 @@ module.exports = {
   SEASONS_TAB,
   SHARED_REGISTER_CHANNEL_ID,
   SHARED_CHALLENGE_CHANNEL_ID,
+  VACATION_APPROVAL_CHANNEL_ID,
   DASHBOARDS_TAB,
   DASHBOARD_PANELS,
   sheetTabUrl,

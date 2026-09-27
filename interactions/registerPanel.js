@@ -7,7 +7,8 @@
 // characters (Vacation / Leave). See CHANNEL_DASHBOARDS_PLAN.md §5.1 / §6.
 //
 // Implemented so far:
-//   D2 — Go on / Return from Vacation (self-serve status flips, below)
+//   D2 — Request Vacation (a manager approves via a single Approve/Deny post) /
+//        Return from Vacation (self-serve status flip, below)
 //   D3 — Leave Ladder (self-serve removal via the shared removalService)
 //   D4 — Extended-Vacation requests (DM every SvS Manager; bench/insert stay
 //        manager-run — the buttons only notify, they never mutate the sheet)
@@ -25,7 +26,7 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const { logError } = require('../logger');
-const { LADDERS } = require('../config/ladders');
+const { LADDERS, VACATION_APPROVAL_CHANNEL_ID } = require('../config/ladders');
 const {
   findUserCharacters,
   findUserVacationCharacters,
@@ -33,10 +34,15 @@ const {
 } = require('../services/characterService');
 const { removeCharacterByRank } = require('../services/removalService');
 const { writeNewCharacter, getTakenElements } = require('../services/registrationService');
-const { findManagerMembers } = require('../utils/managers');
+const { findManagerMembers, findManagerRole, MANAGER_ROLE_NAME } = require('../utils/managers');
 const redisClient = require('../redis-client');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
+
+// A pending vacation request lives this long (7 days) before its Redis lock
+// self-clears — long enough for managers to get to it, short enough that a
+// stale request doesn't linger forever.
+const VACATION_REQUEST_TTL = 7 * 24 * 60 * 60;
 
 const elementEmojiMap = { Fire: '🔥', Light: '⚡', Cold: '❄️' };
 const specEmojiMap = { Vita: '❤️', ES: '🔵' };
@@ -116,12 +122,11 @@ async function handleVacation(interaction, direction) {
 
   if (eligible.length === 1) {
     const c = eligible[0];
-    return applyStatus(
-      interaction,
-      c,
-      direction === 'to' ? 'Vacation' : 'Available',
-      direction === 'to' ? 'is now on vacation' : 'is back from vacation'
-    );
+    // Return is self-serve; going ON vacation is now a manager-approved request.
+    if (direction === 'from') {
+      return applyStatus(interaction, c, 'Available', 'is back from vacation');
+    }
+    return requestVacation(interaction, c);
   }
 
   const customId = direction === 'to' ? 'svs:register:vacpick' : 'svs:register:unvacpick';
@@ -151,12 +156,206 @@ async function handleVacationPick(interaction, direction) {
     });
   }
 
-  return applyStatus(
-    interaction,
-    char,
-    direction === 'to' ? 'Vacation' : 'Available',
-    direction === 'to' ? 'is now on vacation' : 'is back from vacation'
+  // Return is self-serve; going ON vacation is now a manager-approved request.
+  if (direction === 'from') {
+    return applyStatus(interaction, char, 'Available', 'is back from vacation');
+  }
+  return requestVacation(interaction, char);
+}
+
+// --- Vacation request + manager approval -----------------------------------
+// Going on vacation is no longer an instant self-serve flip: it records a
+// pending Redis request and posts a SINGLE Approve/Deny message any SvS Manager
+// can action (VACATION_APPROVAL_AND_THREAD_FIX_PLAN.md §B). Return from vacation
+// stays self-serve (handled above via applyStatus).
+
+// Best-effort DM to the requester about the outcome. Swallows closed-DM errors.
+async function dmRequester(client, discordId, text) {
+  try {
+    const user = await client.users.fetch(discordId);
+    await user.send(text);
+  } catch {
+    // Requester has DMs closed — nothing we can do; the mod post is the record.
+  }
+}
+
+// Post the single Approve/Deny request to the mod approval channel. Returns true
+// on success. Pings the SvS Manager role for visibility (server-side resolves
+// membership, so no manager is missed). Never throws.
+async function postVacationApproval(interaction, char) {
+  try {
+    const channel = await interaction.client.channels
+      .fetch(VACATION_APPROVAL_CHANNEL_ID)
+      .catch(() => null);
+    if (!channel || typeof channel.send !== 'function') {
+      logError(
+        'Vacation approval: approval channel unavailable',
+        new Error(`channel ${VACATION_APPROVAL_CHANNEL_ID} unavailable`)
+      );
+      return false;
+    }
+
+    const requester = interaction.user;
+    const build = `${specEmojiMap[char.spec] || ''} ${char.spec || ''} ${
+      elementEmojiMap[char.element] || ''
+    } ${char.element || ''}`.trim();
+
+    const embed = new EmbedBuilder()
+      .setColor(0x00ae86)
+      .setTitle('🌴 Vacation Request')
+      .setDescription(`<@${requester.id}> (${requester.tag}) is requesting vacation.`)
+      .addFields(
+        { name: 'Character', value: `**${char.name}** (Rank #${char.rank}, ${char.ladder.displayName})` },
+        { name: 'Build', value: build || 'Unknown', inline: true },
+        { name: 'Status', value: 'Pending manager approval', inline: true }
+      )
+      .setTimestamp();
+
+    // Approve/Deny carry the ladder + requester id + element so the handler needs
+    // no server-side state and re-reads the sheet as the source of truth.
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`svs:register:vacapprove:${char.ladderKey}:${requester.id}:${char.element}`)
+        .setLabel('Approve')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`svs:register:vacdeny:${char.ladderKey}:${requester.id}:${char.element}`)
+        .setLabel('Deny')
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    const managerRole = findManagerRole(interaction.guild);
+    await channel.send({
+      content: managerRole ? `<@&${managerRole.id}>` : undefined,
+      embeds: [embed],
+      components: [row],
+      allowedMentions: { roles: managerRole ? [managerRole.id] : [] },
+    });
+    return true;
+  } catch (error) {
+    logError('Vacation approval: failed posting request', error);
+    return false;
+  }
+}
+
+// Record the pending request + post the Approve/Deny message. `interaction` is
+// already deferred/updated by the caller so this only editReplies.
+async function requestVacation(interaction, char) {
+  const discordId = interaction.user.id;
+  const created = await redisClient.createVacationRequest(
+    discordId,
+    char.element,
+    char.ladder,
+    VACATION_REQUEST_TTL
   );
+  if (!created) {
+    return interaction.editReply({
+      content: `⚠️ You already have a pending vacation request for **${char.name}** (${char.ladder.displayName}). A manager will review it soon.`,
+      components: [],
+    });
+  }
+
+  const posted = await postVacationApproval(interaction, char);
+  if (!posted) {
+    // Roll the lock back so the player can retry once the channel is reachable.
+    await redisClient.consumeVacationRequest(discordId, char.element, char.ladder);
+    return interaction.editReply({
+      content:
+        '⚠️ Your request could not be delivered to the SvS Managers right now. Please ping a manager directly.',
+      components: [],
+    });
+  }
+
+  return interaction.editReply({
+    content: `🌴 Your vacation request for **${char.name}** (Rank #${char.rank}, ${char.ladder.displayName}) was sent to the **SvS Managers** for approval. You'll be notified once it's reviewed.`,
+    components: [],
+  });
+}
+
+// Edit the mod approval message into a resolved state (buttons removed) so it
+// can't be actioned twice and the outcome is visible in history.
+async function finalizeApprovalMessage(interaction, color, resultLine) {
+  const original = interaction.message?.embeds?.[0];
+  const embed = original
+    ? EmbedBuilder.from(original).setColor(color)
+    : new EmbedBuilder().setColor(color).setTitle('🌴 Vacation Request');
+  embed.addFields({ name: 'Resolution', value: resultLine });
+  return interaction.editReply({ embeds: [embed], components: [] });
+}
+
+// Approve/Deny button handler (manager-gated). `approve` distinguishes the two.
+async function handleVacationDecision(interaction, ctx, approve) {
+  const isManager = interaction.member?.roles?.cache?.some(r => r.name === MANAGER_ROLE_NAME);
+  if (!isManager) {
+    return interaction.reply({
+      content: `Only **${MANAGER_ROLE_NAME}s** can act on vacation requests.`,
+      ephemeral: true,
+    });
+  }
+  await interaction.deferUpdate();
+
+  const ladderKey = ctx.ladderKey;
+  const discordId = ctx.extra[0];
+  const element = ctx.extra[1];
+  const ladder = LADDERS[ladderKey];
+  if (!ladder || !discordId || !element) {
+    return finalizeApprovalMessage(interaction, 0x808080, 'Malformed request — no action taken.');
+  }
+
+  // First click consumes the pending key; a second manager sees "already handled".
+  const existed = await redisClient.consumeVacationRequest(discordId, element, ladder);
+  if (!existed) {
+    return finalizeApprovalMessage(interaction, 0x808080, 'Already handled — no action taken.');
+  }
+
+  if (!approve) {
+    await dmRequester(
+      interaction.client,
+      discordId,
+      `Your vacation request on the **${ladder.displayName}** was declined by a manager.`
+    );
+    return finalizeApprovalMessage(interaction, 0xcc0000, `❌ Denied by <@${interaction.user.id}>.`);
+  }
+
+  // Approve — re-read the sheet (source of truth) and locate the character by
+  // discordId + element (never by a stale rank).
+  try {
+    const chars = await findUserCharacters(discordId);
+    const char = chars.find(c => c.ladderKey === ladderKey && c.element === element);
+    if (!char) {
+      await dmRequester(
+        interaction.client,
+        discordId,
+        `Your vacation request on the **${ladder.displayName}** couldn't be applied — the character is no longer on the ladder.`
+      );
+      return finalizeApprovalMessage(
+        interaction,
+        0x808080,
+        'Character no longer on the ladder — no change made.'
+      );
+    }
+
+    await setCharacterStatus(char.ladder, char.rowNum, 'Vacation');
+    refreshDashboard(interaction.client, ladderKey, DASHBOARD_PANELS.RANKINGS);
+    await dmRequester(
+      interaction.client,
+      discordId,
+      `🌴 Your vacation request for **${char.name}** (${char.ladder.displayName}) was approved. Your character is now on vacation.`
+    );
+    return finalizeApprovalMessage(
+      interaction,
+      0x2ecc71,
+      `✅ Approved by <@${interaction.user.id}> — **${char.name}** is now on vacation.`
+    );
+  } catch (error) {
+    logError('Vacation approval: approve failed', error);
+    // Restore the pending key so the request can be retried; leave buttons intact.
+    await redisClient.createVacationRequest(discordId, element, ladder, VACATION_REQUEST_TTL);
+    return interaction.followUp({
+      content: 'An error occurred applying the vacation. Please try again.',
+      ephemeral: true,
+    });
+  }
 }
 
 // A one-off confirm/cancel row for a specific character. The confirm button
@@ -619,6 +818,10 @@ async function handle(interaction, ctx) {
       return handleVacationPick(interaction, 'to');
     case 'unvacpick':
       return handleVacationPick(interaction, 'from');
+    case 'vacapprove':
+      return handleVacationDecision(interaction, ctx, true);
+    case 'vacdeny':
+      return handleVacationDecision(interaction, ctx, false);
     case 'leave':
       return handleLeave(interaction);
     case 'leavepick':

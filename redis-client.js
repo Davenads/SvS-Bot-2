@@ -634,6 +634,50 @@ class RedisClient extends EventEmitter {
         }
     }
 
+    // --- Vacation-request pending lock ---------------------------------------
+    // A pending self-serve vacation request awaiting manager approval
+    // (VACATION_APPROVAL_AND_THREAD_FIX_PLAN.md §B). The key doubles as (a) a
+    // dedupe guard so a player can't stack requests for the same character and
+    // (b) the double-processing lock: the FIRST Approve/Deny click consumes it,
+    // so a second manager's click sees "already handled". Keyed by the same
+    // discordId-element pair the approval buttons carry so both sides resolve to
+    // one key regardless of ladder. Namespaced per ladder.
+    generateVacationRequestKey(discordId, element, ladder) {
+        const prefix = ladderPrefix(ladder);
+        return `svs:vacation-request:${prefix}:${discordId}-${element}`;
+    }
+
+    // Record a pending request. Returns true if newly created, false if one
+    // already exists (SET NX). Fails open (true) when Redis is unavailable.
+    async createVacationRequest(discordId, element, ladder, ttlSeconds) {
+        if (!this.client) return true;
+        const key = this.generateVacationRequestKey(discordId, element, ladder);
+        try {
+            const result = await this.client.set(key, '1', 'EX', ttlSeconds, 'NX');
+            return result !== null;
+        } catch (error) {
+            console.error('Error creating vacation request:', error);
+            logError('Error creating vacation request', error);
+            return true; // Fail open so a Redis hiccup never blocks the request.
+        }
+    }
+
+    // Consume (delete) the pending request. Returns true if the key existed —
+    // this is the atomic double-processing guard for the Approve/Deny buttons.
+    // Fails open (true) when Redis is unavailable.
+    async consumeVacationRequest(discordId, element, ladder) {
+        if (!this.client) return true;
+        const key = this.generateVacationRequestKey(discordId, element, ladder);
+        try {
+            const removed = await this.client.del(key);
+            return removed > 0;
+        } catch (error) {
+            console.error('Error consuming vacation request:', error);
+            logError('Error consuming vacation request', error);
+            return true; // Fail open so a Redis hiccup never blocks approval.
+        }
+    }
+
     // --- Challenge-thread sidecar --------------------------------------------
     // Durable map of a challenge pair -> its #issue-a-challenge coordination
     // thread id. Keyed by the SAME sorted (discordId-element) pair as the

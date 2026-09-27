@@ -99,7 +99,7 @@ Give each format a set of **three dashboard channels** hosting **persistent,
 self-updating bot messages** ("dashboards" / "control panels"):
 
 1. **`#register`** — a control panel with buttons for player self-service:
-   Sign Up, Leave Ladder, Go on Vacation, Return from Vacation,
+   Sign Up, Leave Ladder, Request Vacation (manager-approved), Return from Vacation,
    Request Extended Vacation, Return from Extended Vacation.
 2. **`#rankings`** (read-only) — an always-current leaderboard (the existing
    `/leaderboard` embed) plus a hyperlink to the full Google Sheet. Edited in place.
@@ -112,11 +112,11 @@ buttons are an additive surface.
 
 ### What the reference screenshots show
 - **#register** — one embed titled *"Join the Ladder"* + 6 buttons
-  (Sign Up = blurple, Leave Ladder = red, Go on Vacation = grey,
+  (Sign Up = blurple, Leave Ladder = red, Request Vacation = grey,
   Return from Vacation = green, Request Extended Vacation = grey,
   Return from Extended Vacation = green).
-  *(The reference bot's "a manager reviews every request" copy does NOT apply — we
-  are self-serve; see §6.)*
+  *(Vacation is manager-approved: Request Vacation posts a single Approve/Deny
+  message for the SvS Managers. Return from Vacation stays self-serve; see §6.)*
 - **#rankings** — embed with a hyperlink *"Open the full ladder in Google Sheets"*
   and a live Top-N list. Message is **edited in place** (shows *"(edited)"* + update
   stamp). We render this with the **`/leaderboard` embed**, not an image card.
@@ -313,7 +313,7 @@ Persistent embed + 6 buttons (as in the screenshot). Behaviors:
 |---|---|---|
 | **Sign Up** | Multi-step self-serve flow (§6). Validates the "1 char per element per ladder" rule, then writes the ladder row + formatting (reuses `/register` core, no manager gate). | **Must already hold `SvS Dueler`** (re-checked in-handler). Bot does **not** grant the role — **decision (a): keep the gate, admins assign `SvS Dueler` manually.** A brand-new player without the role gets an ephemeral explaining they need an admin to grant it before signing up. No `roles.add` is added to the codebase. |
 | **Leave Ladder** | Confirm → **full removal** from the ladder (mirrors the existing `/remove` re-rank + "Farewell from the Ladder!" flow). **Normal user:** removes their *own* character (multi-char → pick which of own). **Manager:** may select **any** character on the ladder. | Self for normal users; managers unrestricted |
-| **Go on Vacation** | Sets the caller's char status = Vacation. | Self; must be registered |
+| **Request Vacation** | Records a pending request + posts a single Approve/Deny message for the SvS Managers. On approve the char status = Vacation. | Self to request; **manager** approves |
 | **Return from Vacation** | Clears Vacation status. | Self |
 | **Request Extended Vacation** | **Does NOT self-serve.** Sends a **DM to the SvS Managers** with the caller's character + request; a manager then runs `/bench`. Caller gets an ephemeral "request sent." | Manager performs the actual `/bench` |
 | **Return from Extended Vacation** | Same pattern — **DMs the managers** to request restoration; a manager runs `/insert`. | Manager performs the actual `/insert` |
