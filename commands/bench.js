@@ -4,6 +4,7 @@ const { logError } = require('../logger')
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const redisClient = require('../redis-client');
 const { getLadderFromOption } = require('../utils/ladder');
+const { forfeitActiveChallenge } = require('../services/matchResult');
 
 // Initialize the Google Sheets API client
 const sheets = google.sheets({
@@ -79,7 +80,7 @@ module.exports = {
     }
 
     try {
-      const rankToRemove = interaction.options.getInteger('rank')
+      let rankToRemove = interaction.options.getInteger('rank')
 
       // First, fetch data from both sheets
       const [mainResult, vacationResult] = await Promise.all([
@@ -93,7 +94,7 @@ module.exports = {
         })
       ])
 
-      const rows = mainResult.data.values
+      let rows = mainResult.data.values
       if (!rows || !rows.length) {
         console.log('└─ Error: No data found in leaderboard')
         return interaction.editReply({
@@ -103,7 +104,7 @@ module.exports = {
       }
 
       // Find the row to remove
-      const rowIndex = rows.findIndex(
+      let rowIndex = rows.findIndex(
         row => row[0] && parseInt(row[0]) === rankToRemove
       )
       if (rowIndex === -1) {
@@ -115,7 +116,46 @@ module.exports = {
       }
 
       // Store player details
-      const playerData = rows[rowIndex]
+      let playerData = rows[rowIndex]
+
+      // If the player is mid-challenge, forfeit to their opponent first so the
+      // opponent is awarded the win before we remove this player. resolveMatch
+      // may swap ranks, so re-read and re-locate the player by identity after.
+      if (playerData[5] === 'Challenge') {
+        const benchDiscordId = playerData[8]
+        const benchElement = playerData[3]
+        try {
+          const forfeit = await forfeitActiveChallenge(interaction.client, ladder, {
+            discordId: benchDiscordId,
+            element: benchElement,
+            announceChannel: interaction.channel
+          })
+          if (forfeit.forfeited) {
+            console.log(`├─ Forfeited active challenge — ${forfeit.winnerName} awarded the win`)
+            const fresh = await sheets.spreadsheets.values.get({
+              spreadsheetId: SPREADSHEET_ID,
+              range: `${ladder.sheetName}!A2:K`
+            })
+            rows = fresh.data.values || []
+            rowIndex = rows.findIndex(
+              row => row[8] === benchDiscordId && row[3] === benchElement
+            )
+            if (rowIndex === -1) {
+              console.log('└─ Error: Player not found after forfeit re-read')
+              return interaction.editReply({
+                content: 'Could not re-locate the player after forfeiting their challenge. Please re-run /bench.',
+                ephemeral: true
+              })
+            }
+            playerData = rows[rowIndex]
+            rankToRemove = parseInt(playerData[0])
+          }
+        } catch (forfeitError) {
+          logError(`Bench: forfeit failed: ${forfeitError.message}`, forfeitError)
+          // Fall through — the existing challenge-cleanup logic below still frees
+          // the opponent even if the forfeit result couldn't be recorded.
+        }
+      }
       const playerName = playerData[1]
       const playerSpec = playerData[2]
       const playerElement = playerData[3]

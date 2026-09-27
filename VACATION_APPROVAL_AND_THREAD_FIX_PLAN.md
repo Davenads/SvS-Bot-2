@@ -191,13 +191,13 @@ existing pattern (`challengeService`, `registrationService`, `removalService`).
 
 ## Phased rollout
 
-| Phase | Scope | Risk |
-|---|---|---|
-| **1** | A1 (thread role mention) + A2 (`findManagerMembers` fetch) | Low — isolated |
-| **2** | C-0: extract `resolveMatch`, rewire `/reportwin` (no behavior change) | Low — refactor |
-| **3** | B: label revert + request/approval flow + Redis pending key | Medium |
-| **4** | C-1: allow Challenge-status requests + forfeit on approve | Medium |
-| **5** | QA pass (extend `PHASE_QA_CHECKLIST.md`) | — |
+| Phase | Scope | Risk | Status |
+|---|---|---|---|
+| **1** | A1 (thread role mention) + A2 (`findManagerMembers` fetch) | Low — isolated | ✅ done |
+| **2** | C-0: extract `resolveMatch`, rewire `/reportwin` (no behavior change) | Low — refactor | ✅ done |
+| **3** | B: label revert + request/approval flow + Redis pending key | Medium | ✅ done |
+| **4** | C-1: allow Challenge-status requests + forfeit on approve + `/bench` auto-forfeit | Medium | ✅ done |
+| **5** | QA pass (extend `PHASE_QA_CHECKLIST.md`) | — | pending |
 
 ## QA checklist (add to PHASE_QA_CHECKLIST.md)
 - [ ] New challenge thread pings the **role**; **every** manager lands in the

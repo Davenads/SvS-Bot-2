@@ -312,4 +312,50 @@ async function resolveMatch (client, ladder, { rows, winnerRow, loserRow, announ
   return { isDefense, winnerRank, loserRank, winnerDetails, loserDetails, embed: resultEmbed }
 }
 
-module.exports = { resolveMatch }
+// Forfeit path: a player who leaves an active challenge (goes on vacation / is
+// benched) hands their opponent the win. Identified by discordId + element, this
+// reads the ladder itself so it works on a fresh, self-consistent snapshot, then
+// runs resolveMatch with the opponent as the winner. Returns
+//   { forfeited: true, result, winnerName, loserName }              on success
+//   { forfeited: false, reason }                                    otherwise
+// The "nothing to forfeit" reasons (not-in-challenge, no-opponent, …) are normal
+// outcomes, not errors, so callers can proceed regardless.
+async function forfeitActiveChallenge (client, ladder, { discordId, element, announceChannel }) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${ladder.sheetName}!A2:K`
+  })
+  const rows = res.data.values || []
+
+  const loserRow = rows.find(r => r[8] === discordId && r[3] === element)
+  if (!loserRow) return { forfeited: false, reason: 'character-not-found' }
+  if (String(loserRow[5] || '').toLowerCase() !== 'challenge') {
+    return { forfeited: false, reason: 'not-in-challenge' }
+  }
+
+  const oppRank = parseInt(loserRow[7])
+  if (!oppRank) return { forfeited: false, reason: 'no-opponent' }
+  const winnerRow = rows.find(r => parseInt(r[0]) === oppRank)
+  if (!winnerRow) return { forfeited: false, reason: 'opponent-not-found' }
+
+  // Default the announcement to the ladder's challenge channel when the caller
+  // didn't supply one.
+  let channel = announceChannel || null
+  if (!channel && ladder.challengeChannelId) {
+    try {
+      channel = await client.channels.fetch(ladder.challengeChannelId)
+    } catch {
+      channel = null
+    }
+  }
+
+  const result = await resolveMatch(client, ladder, {
+    rows,
+    winnerRow,
+    loserRow,
+    announceChannel: channel
+  })
+  return { forfeited: true, result, winnerName: winnerRow[1], loserName: loserRow[1] }
+}
+
+module.exports = { resolveMatch, forfeitActiveChallenge }

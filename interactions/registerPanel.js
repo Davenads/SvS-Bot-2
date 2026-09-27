@@ -34,6 +34,7 @@ const {
 } = require('../services/characterService');
 const { removeCharacterByRank } = require('../services/removalService');
 const { writeNewCharacter, getTakenElements } = require('../services/registrationService');
+const { forfeitActiveChallenge } = require('../services/matchResult');
 const { findManagerMembers, findManagerRole, MANAGER_ROLE_NAME } = require('../utils/managers');
 const redisClient = require('../redis-client');
 const { refreshDashboard } = require('../dashboards/refresh');
@@ -108,14 +109,14 @@ async function handleVacation(interaction, direction) {
 
   const eligible =
     direction === 'to'
-      ? chars.filter(c => c.status === 'Available')
+      ? chars.filter(c => c.status === 'Available' || c.status === 'Challenge')
       : chars.filter(c => c.status === 'Vacation');
 
   if (!eligible.length) {
     return interaction.editReply({
       content:
         direction === 'to'
-          ? 'None of your characters are available to put on vacation — a character must be **Available** (not in a challenge or already on vacation).'
+          ? 'None of your characters can go on vacation — a character must be **Available** or in an active **Challenge** (a challenge is forfeited on approval).'
           : 'None of your characters are currently on vacation.',
     });
   }
@@ -144,9 +145,9 @@ async function handleVacationPick(interaction, direction) {
   await interaction.deferUpdate();
   const [ladderKey, rank] = String(interaction.values[0]).split(':');
   const chars = await findUserCharacters(interaction.user.id);
-  const requiredStatus = direction === 'to' ? 'Available' : 'Vacation';
+  const requiredStatuses = direction === 'to' ? ['Available', 'Challenge'] : ['Vacation'];
   const char = chars.find(
-    c => c.ladderKey === ladderKey && String(c.rank) === String(rank) && c.status === requiredStatus
+    c => c.ladderKey === ladderKey && String(c.rank) === String(rank) && requiredStatuses.includes(c.status)
   );
 
   if (!char) {
@@ -210,6 +211,15 @@ async function postVacationApproval(interaction, char) {
         { name: 'Status', value: 'Pending manager approval', inline: true }
       )
       .setTimestamp();
+
+    // Flag the forfeit consequence up front when the character is mid-challenge.
+    if (String(char.status || '').toLowerCase() === 'challenge') {
+      embed.addFields({
+        name: '⚠️ Active Challenge',
+        value:
+          'This character is currently in a challenge. Approving will **forfeit** it — the opponent is awarded the win.',
+      });
+    }
 
     // Approve/Deny carry the ladder + requester id + element so the handler needs
     // no server-side state and re-reads the sheet as the source of truth.
@@ -335,17 +345,40 @@ async function handleVacationDecision(interaction, ctx, approve) {
       );
     }
 
-    await setCharacterStatus(char.ladder, char.rowNum, 'Vacation');
+    // If the character is mid-challenge, forfeit to the opponent first so the
+    // opponent is awarded the win before the character parks on vacation.
+    let forfeitNote = '';
+    if (String(char.status || '').toLowerCase() === 'challenge') {
+      try {
+        const f = await forfeitActiveChallenge(interaction.client, char.ladder, {
+          discordId,
+          element,
+        });
+        if (f.forfeited) {
+          forfeitNote = ` Their active challenge was forfeited — **${f.winnerName}** was awarded the win.`;
+        }
+      } catch (err) {
+        logError('Vacation approval: forfeit failed', err);
+      }
+    }
+
+    // Re-locate the character (a forfeit swap may have moved its rank/row) and
+    // flip it to Vacation.
+    const relocated = (await findUserCharacters(discordId)).find(
+      c => c.ladderKey === ladderKey && c.element === element
+    );
+    const target = relocated || char;
+    await setCharacterStatus(target.ladder, target.rowNum, 'Vacation');
     refreshDashboard(interaction.client, ladderKey, DASHBOARD_PANELS.RANKINGS);
     await dmRequester(
       interaction.client,
       discordId,
-      `🌴 Your vacation request for **${char.name}** (${char.ladder.displayName}) was approved. Your character is now on vacation.`
+      `🌴 Your vacation request for **${target.name}** (${target.ladder.displayName}) was approved. Your character is now on vacation.${forfeitNote}`
     );
     return finalizeApprovalMessage(
       interaction,
       0x2ecc71,
-      `✅ Approved by <@${interaction.user.id}> — **${char.name}** is now on vacation.`
+      `✅ Approved by <@${interaction.user.id}> — **${target.name}** is now on vacation.${forfeitNote}`
     );
   } catch (error) {
     logError('Vacation approval: approve failed', error);
