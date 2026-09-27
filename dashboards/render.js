@@ -223,7 +223,7 @@ function buildRegisterPayload() {
         '',
         '**Sign Up** — register a new character (pick HLD/LLD, element, and build).',
         '**Leave Ladder** — permanently remove one of your characters.',
-        '**Request / Return from Vacation** — flip your character to 🌴 Vacation and back.',
+        '**Go on / Return from Vacation** — flip your character to 🌴 Vacation and back.',
         '**Request / Return from Extended Vacation** — notifies the SvS Managers (bench/insert stays manager-run).',
         '',
         '_You must hold the **SvS Dueler** role to sign up. Ask an admin if you don\'t have it yet._',
@@ -245,7 +245,7 @@ function buildRegisterPayload() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('svs:register:vacation')
-        .setLabel('🌴 Request Vacation')
+        .setLabel('🌴 Go on Vacation')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('svs:register:unvacation')

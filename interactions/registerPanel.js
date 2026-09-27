@@ -7,7 +7,7 @@
 // characters (Vacation / Leave). See CHANNEL_DASHBOARDS_PLAN.md §5.1 / §6.
 //
 // Implemented so far:
-//   D2 — Request / Return from Vacation (self-serve status flips, below)
+//   D2 — Go on / Return from Vacation (self-serve status flips, below)
 //   D3 — Leave Ladder (self-serve removal via the shared removalService)
 //   D4 — Extended-Vacation requests (DM every SvS Manager; bench/insert stay
 //        manager-run — the buttons only notify, they never mutate the sheet)
