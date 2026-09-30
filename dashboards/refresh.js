@@ -19,9 +19,15 @@ const {
   DASHBOARD_PANELS,
   SHARED_CHALLENGE_CHANNEL_ID,
   SHARED_REGISTER_CHANNEL_ID,
+  SHARED_MANAGER_CHANNEL_ID,
 } = require('../config/ladders');
 const { getDashboardMessage, setDashboardMessage } = require('./registry');
-const { buildRankingsPayload, buildChallengesPayload, buildRegisterPayload } = require('./render');
+const {
+  buildRankingsPayload,
+  buildChallengesPayload,
+  buildRegisterPayload,
+  buildManagerPayload,
+} = require('./render');
 const { logError } = require('../logger');
 
 // Coalesce mutation bursts (a shuffle touches many rows) into one edit per
@@ -102,8 +108,10 @@ async function doRefresh(client, ladderKey, panel) {
 }
 
 // Immediately (re)render and edit-or-repost a SHARED (non-ladder) panel. Today
-// that's just the register control panel, which is static (buttons only) so it
-// never needs a mutation-triggered refresh — only hydration / the safety sweep.
+// those are the register control panel and the SvS Manager control panel, both
+// static (buttons only) so they never need a mutation-triggered refresh — only
+// hydration / the safety sweep. The manager panel is skipped unless a channel is
+// configured (MANAGER_PANEL_CHANNEL_ID), so it never posts to a wrong channel.
 async function doRefreshShared(client, panel) {
   let plan = null;
   try {
@@ -112,6 +120,12 @@ async function doRefreshShared(client, panel) {
         scope: 'shared',
         channelId: SHARED_REGISTER_CHANNEL_ID,
         payload: buildRegisterPayload(),
+      };
+    } else if (panel === DASHBOARD_PANELS.MANAGER) {
+      plan = {
+        scope: 'shared',
+        channelId: SHARED_MANAGER_CHANNEL_ID,
+        payload: buildManagerPayload(),
       };
     }
   } catch (error) {
@@ -144,8 +158,9 @@ async function hydrateAll(client) {
     await doRefresh(client, ladderKey, DASHBOARD_PANELS.RANKINGS);
     await doRefresh(client, ladderKey, DASHBOARD_PANELS.CHALLENGES);
   }
-  // The register panel is shared across ladders — reconcile it once.
+  // Shared panels are reconciled once (not per-ladder).
   await doRefreshShared(client, DASHBOARD_PANELS.REGISTER);
+  await doRefreshShared(client, DASHBOARD_PANELS.MANAGER);
 }
 
 module.exports = { refreshDashboard, hydrateAll };

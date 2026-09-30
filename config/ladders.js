@@ -88,6 +88,12 @@ const SHARED_CHALLENGE_CHANNEL_ID = '1553197193849081977'; // #issue-a-challenge
 // defaults to the existing command-log channel so the flow works out of the box.
 const VACATION_APPROVAL_CHANNEL_ID = '1165300795277848587';
 
+// Channel hosting the SvS Manager control panel (a shared, static button panel
+// modeled on the #register panel). Set MANAGER_PANEL_CHANNEL_ID in the env to a
+// manager-only channel; when unset the panel simply is not posted (no default,
+// so it never lands in a public channel by accident). See MANAGER_PANEL_PLAN.md.
+const SHARED_MANAGER_CHANNEL_ID = process.env.MANAGER_PANEL_CHANNEL_ID || '';
+
 // Hidden tab that durably maps each dashboard panel to the (channel, message)
 // the bot edits in place, so a restart reconciles state instead of reposting.
 // Columns A->E: Ladder | Panel | Channel ID | Message ID | Last Updated.
@@ -99,6 +105,7 @@ const DASHBOARD_PANELS = {
   RANKINGS: 'rankings',
   REGISTER: 'register',
   CHALLENGES: 'challenges',
+  MANAGER: 'manager',
 };
 
 // Deep-link to a specific ladder's sheet tab. `sheetId` is the tab gid, so the
@@ -117,6 +124,7 @@ module.exports = {
   SHARED_REGISTER_CHANNEL_ID,
   SHARED_CHALLENGE_CHANNEL_ID,
   VACATION_APPROVAL_CHANNEL_ID,
+  SHARED_MANAGER_CHANNEL_ID,
   DASHBOARDS_TAB,
   DASHBOARD_PANELS,
   sheetTabUrl,

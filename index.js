@@ -36,10 +36,10 @@ for (const file of commandFiles) {
 client.once('ready', () => {
     const timestamp = new Date().toLocaleString();
     console.log(`Logged in as ${client.user.tag} at ${timestamp}`);
-    
+
     // Initialize the event-driven challenge expiry handler
     initializeChallengeExpiryHandler(client);
-    
+
     // Run a safety check on startup
     runSafetyCheck(client);
 
@@ -115,10 +115,16 @@ client.on('interactionCreate', async interaction => {
         } catch (error) {
             logError('Error in autocomplete handler', error);
         }
-    } else if (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) {
+    } else if (
+        interaction.isButton() ||
+        interaction.isStringSelectMenu() ||
+        interaction.isUserSelectMenu() ||
+        interaction.isModalSubmit()
+    ) {
         // Dashboard component handling. Only `svs:`-namespaced components are
         // routed here; any other component id belongs to a per-message collector
         // (e.g. /leaderboard pagination) and is intentionally left alone.
+        // isUserSelectMenu() is included for the Manager Panel's owner picker.
         await routeComponent(interaction);
     }
 });

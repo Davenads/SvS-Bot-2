@@ -267,4 +267,67 @@ function buildRegisterPayload() {
   return { embeds: [embed], components };
 }
 
-module.exports = { buildRankingsPayload, buildChallengesPayload, buildRegisterPayload };
+// ---------------------------------------------------------------------------
+// SvS Manager control panel (SHARED across both ladders, manager-only channel).
+// Static like the register panel: the ladder + target are chosen inside each
+// button's wizard, so no ladder rides in these top-level customIds. Handlers
+// live in interactions/managerPanel.js and re-check the SvS Manager role on
+// click. Only the actions wired so far are rendered; more buttons land per phase
+// (see MANAGER_PANEL_PLAN.md).
+function buildManagerPayload() {
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('🛠️ SvS Manager Panel')
+    .setDescription(
+      [
+        'Manager-only controls. Every action is a step-by-step wizard, is ephemeral to you, and re-reads the sheet before writing. Destructive actions ask for confirmation.',
+        '',
+        '**➕ Add Character** — register a character for a member (pick owner, ladder, element, build).',
+        '**🗑️ Remove Character** — permanently remove a character and re-rank the ladder.',
+        '**🌴 Set Vacation** — flip any character to/from Vacation (forfeits an active challenge).',
+        '**🏃 Record Dodge** — increment a player\'s dodge count.',
+        '**🔄 Refresh Boards** — force-reconcile every live dashboard now.',
+        '',
+        '_Only members with the **SvS Manager** role can use these._',
+      ].join('\n')
+    )
+    .setFooter({ text: 'SvS Manager Panel • actions apply to HLD or LLD (chosen per action)' });
+
+  const components = [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('svs:manager:addchar')
+        .setLabel('➕ Add Character')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('svs:manager:remove')
+        .setLabel('🗑️ Remove Character')
+        .setStyle(ButtonStyle.Danger)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('svs:manager:setvac')
+        .setLabel('🌴 Set Vacation')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('svs:manager:dodge')
+        .setLabel('🏃 Record Dodge')
+        .setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('svs:manager:refreshboards')
+        .setLabel('🔄 Refresh Boards')
+        .setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+
+  return { embeds: [embed], components };
+}
+
+module.exports = {
+  buildRankingsPayload,
+  buildChallengesPayload,
+  buildRegisterPayload,
+  buildManagerPayload,
+};
