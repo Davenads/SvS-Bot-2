@@ -41,6 +41,7 @@ const { forfeitActiveChallenge } = require('../services/matchResult');
 const { writeNewCharacter, getTakenElements } = require('../services/registrationService');
 const { forceCancelChallengeByRank } = require('../services/challengeAdminService');
 const { shuffleLadder } = require('../services/shuffleService');
+const { readSeasonChampions, resolveCurrentSeason, performRollover } = require('../services/seasonService');
 const redisClient = require('../redis-client');
 const { refreshDashboard, hydrateAll } = require('../dashboards/refresh');
 
@@ -727,6 +728,85 @@ async function handleShuffleGo(interaction, ctx) {
   }
 }
 
+// --- Reset Season (End Season) — composes performRollover + shuffleLadder ----
+// ladder select -> typed-name confirmation modal -> archive champion (rank #1)
+// via seasonService, then shuffle all ranks for the new season. The champion is
+// archived BEFORE the shuffle (rank #1 is the season winner). Irreversible, so
+// gated behind typing the exact ladder name and a Redis lock.
+
+async function handleReset(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  return interaction.editReply({
+    content: '🏁 **Reset Season (End Season)** — which ladder?\nThis archives the current champion, starts the next season, and shuffles every rank (all challenges cleared).',
+    components: [ladderSelectRow('reset')],
+  });
+}
+
+async function handleResetFmt(interaction) {
+  // showModal must be the FIRST response to this interaction — do NOT defer.
+  const ladderKey = interaction.values[0];
+  const ladder = ladderOrNull(ladderKey);
+  if (!ladder) {
+    return interaction.reply({ content: 'Unknown ladder.', ephemeral: true });
+  }
+  const modal = new ModalBuilder()
+    .setCustomId(`svs:manager:reset_submit:${ladderKey}`)
+    .setTitle('Confirm End of Season');
+  const confirm = new TextInputBuilder()
+    .setCustomId('confirm_name')
+    .setLabel('Type the ladder name to confirm')
+    .setPlaceholder(ladder.displayName)
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(60);
+  modal.addComponents(new ActionRowBuilder().addComponents(confirm));
+  return interaction.showModal(modal);
+}
+
+async function handleResetSubmit(interaction, ctx) {
+  await interaction.deferReply({ ephemeral: true });
+  const ladderKey = ctx.ladderKey;
+  const ladder = ladderOrNull(ladderKey);
+  if (!ladder) {
+    return interaction.editReply({ content: 'Unknown ladder.' });
+  }
+  const typed = (interaction.fields.getTextInputValue('confirm_name') || '').trim();
+  if (typed.toLowerCase() !== ladder.displayName.toLowerCase()) {
+    return interaction.editReply({
+      content: `❌ Confirmation text did not match **${ladder.displayName}**. No changes were made.`,
+    });
+  }
+
+  const lockKey = `svs:manager:reset:lock:${ladderKey}`;
+  const gotLock = await redisClient.acquireLock(lockKey, 60);
+  if (!gotLock) {
+    return interaction.editReply({ content: 'A season reset is already in progress for this ladder — give it a moment.' });
+  }
+
+  try {
+    // 1) Archive the champion BEFORE shuffling (rank #1 is the season winner).
+    const championRows = await readSeasonChampions();
+    const season = await resolveCurrentSeason(ladder, championRows);
+    const championEmbed = await performRollover(ladder, season, interaction.user.tag);
+
+    // 2) Shuffle every rank and clear all active challenges for the new season.
+    const shuffle = await shuffleLadder(interaction.client, ladder, { clearCooldowns: false });
+    const shuffleLine = shuffle.success
+      ? `🎲 Ranks shuffled (${shuffle.playersShuffled}) and ${shuffle.challengesCleared} challenge${shuffle.challengesCleared === 1 ? '' : 's'} cleared.`
+      : `⚠️ Season archived, but the shuffle failed: ${shuffle.reason} Run 🎲 Shuffle Ranks manually.`;
+
+    return interaction.editReply({
+      content: `🏁 **${ladder.displayName} season reset complete.** ${shuffleLine}`,
+      embeds: [championEmbed],
+    });
+  } catch (error) {
+    logError('Manager panel: reset season failed', error);
+    return interaction.editReply({ content: 'An error occurred during the season reset. Check the sheet and logs before retrying.' });
+  } finally {
+    await redisClient.releaseLock(lockKey);
+  }
+}
+
 // --- Points Standing (read-only; mirrors /stats title-defends page) ---------
 // ladder select -> this season's title-defense standings (ephemeral, no writes).
 
@@ -902,6 +982,13 @@ async function handle(interaction, ctx) {
     case 'shuffle_cancel':
       await interaction.deferUpdate();
       return interaction.editReply({ content: 'Cancelled — no changes made.', components: [] });
+
+    case 'reset':
+      return handleReset(interaction);
+    case 'reset_fmt':
+      return handleResetFmt(interaction);
+    case 'reset_submit':
+      return handleResetSubmit(interaction, ctx);
 
     case 'points':
       return handlePoints(interaction);

@@ -288,6 +288,7 @@ function buildManagerPayload() {
         '**🏃 Record Dodge** — increment a player\'s dodge count.',
         '**⛔ Force-Cancel Match** — void an active challenge with no rank change.',
         '**🎲 Shuffle Ranks** — randomize all ranks and clear challenges (cooldowns preserved).',
+        '**🏁 Reset Season** — archive the champion, start the next season, and shuffle (typed confirmation).',
         '**📈 Points Standing** — this season\'s title-defense standings (read-only).',
         '**📖 Guide** — the League Manager reference. **🔄 Refresh Boards** — reconcile every dashboard now.',
         '',
@@ -325,6 +326,10 @@ function buildManagerPayload() {
       new ButtonBuilder()
         .setCustomId('svs:manager:shuffle')
         .setLabel('🎲 Shuffle Ranks')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId('svs:manager:reset')
+        .setLabel('🏁 Reset Season')
         .setStyle(ButtonStyle.Danger)
     ),
     new ActionRowBuilder().addComponents(
