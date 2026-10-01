@@ -39,6 +39,8 @@ const { removeCharacterByRank } = require('../services/removalService');
 const { setCharacterStatus } = require('../services/characterService');
 const { forfeitActiveChallenge } = require('../services/matchResult');
 const { writeNewCharacter, getTakenElements } = require('../services/registrationService');
+const { forceCancelChallengeByRank } = require('../services/challengeAdminService');
+const { shuffleLadder } = require('../services/shuffleService');
 const redisClient = require('../redis-client');
 const { refreshDashboard, hydrateAll } = require('../dashboards/refresh');
 
@@ -596,6 +598,231 @@ async function handleRefreshBoards(interaction) {
   }
 }
 
+// --- Force-Cancel Match (mirrors /cancelchallenge) -------------------------
+// ladder select -> active-challenge picker -> confirm -> force cancel. Voids an
+// active match with NO rank change (disputes/mistakes). Delegates to
+// challengeAdminService so the slash command and panel share one path.
+
+async function handleFCancel(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  return interaction.editReply({
+    content: '⛔ **Force-Cancel Match** — which ladder?',
+    components: [ladderSelectRow('fcancel')],
+  });
+}
+
+async function handleFCancelFmt(interaction) {
+  await interaction.deferUpdate();
+  const ladderKey = interaction.values[0];
+  const ladder = ladderOrNull(ladderKey);
+  if (!ladder) return interaction.editReply({ content: 'Unknown ladder.', components: [] });
+
+  const chars = await readRoster(ladder);
+  const active = chars.filter(c => c.status === 'Challenge');
+  if (!active.length) {
+    return interaction.editReply({ content: `No active challenges on the ${ladder.displayName} right now.`, components: [] });
+  }
+  return interaction.editReply({
+    content: `Select a player whose match to **force-cancel** on the ${ladder.displayName} (no rank change):`,
+    components: [rosterSelectRow(`svs:manager:fcancel_pick:${ladderKey}`, 'Select a player in an active match', active)],
+  });
+}
+
+async function handleFCancelPick(interaction) {
+  await interaction.deferUpdate();
+  const [ladderKey, rank] = String(interaction.values[0]).split(':');
+  const ladder = ladderOrNull(ladderKey);
+  if (!ladder) return interaction.editReply({ content: 'Unknown ladder.', components: [] });
+
+  const chars = await readRoster(ladder);
+  const char = chars.find(c => String(c.rank) === String(rank));
+  if (!char) {
+    return interaction.editReply({ content: 'That player could no longer be found. Please try again.', components: [] });
+  }
+  if (char.status !== 'Challenge') {
+    return interaction.editReply({ content: `**${char.name}** is no longer in an active match.`, components: [] });
+  }
+  return interaction.editReply({
+    content: `⚠️ Force-cancel the match involving **${char.name}** (Rank #${char.rank}, ${ladder.displayName})? Both players return to Available with **no rank change**.`,
+    components: [confirmRow(`svs:manager:fcancel_go:${ladderKey}:${rank}`, 'svs:manager:fcancel_cancel', 'Yes, cancel match', true)],
+  });
+}
+
+async function handleFCancelGo(interaction, ctx) {
+  await interaction.deferUpdate();
+  const ladderKey = ctx.ladderKey;
+  const rank = ctx.extra[0];
+  const ladder = ladderOrNull(ladderKey);
+  if (!ladder || !rank) {
+    return interaction.editReply({ content: 'Unknown ladder or rank.', components: [] });
+  }
+  try {
+    const result = await forceCancelChallengeByRank(interaction.client, ladder, rank);
+    if (!result.success) {
+      return interaction.editReply({ content: `❌ ${result.reason}`, components: [] });
+    }
+    return interaction.editReply({
+      content: `⛔ The match between **${result.player.name}** (Rank #${result.player.rank}) and **${result.opponent.name}** (Rank #${result.opponent.rank}) on the ${ladder.displayName} was force-cancelled. Both are back to Available; no ranks changed.`,
+      components: [],
+    });
+  } catch (error) {
+    logError('Manager panel: force-cancel failed', error);
+    return interaction.editReply({ content: 'An error occurred while cancelling the match. Please try again later.', components: [] });
+  }
+}
+
+// --- Shuffle Ranks (mirrors /shuffle) --------------------------------------
+// ladder select -> warn if active challenges -> confirm -> shuffle. Preserves
+// cooldowns (prunes only invalid ones), matching the slash command default.
+
+async function handleShuffle(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  return interaction.editReply({
+    content: '🎲 **Shuffle Ranks** — which ladder?',
+    components: [ladderSelectRow('shuffle')],
+  });
+}
+
+async function handleShuffleFmt(interaction) {
+  await interaction.deferUpdate();
+  const ladderKey = interaction.values[0];
+  const ladder = ladderOrNull(ladderKey);
+  if (!ladder) return interaction.editReply({ content: 'Unknown ladder.', components: [] });
+
+  const chars = await readRoster(ladder);
+  if (!chars.length) {
+    return interaction.editReply({ content: `No players on the ${ladder.displayName} to shuffle.`, components: [] });
+  }
+  const activeChallenges = chars.filter(c => c.status === 'Challenge').length;
+  const warn = activeChallenges > 0
+    ? `\n\n⚠️ There ${activeChallenges === 1 ? 'is' : 'are'} **${activeChallenges}** active challenge${activeChallenges === 1 ? '' : 's'} — shuffling will **clear ${activeChallenges === 1 ? 'it' : 'them all'}** (everyone set to Available).`
+    : '';
+  return interaction.editReply({
+    content: `🎲 Randomly shuffle all **${chars.length}** ranks on the ${ladder.displayName}? Cooldowns are preserved.${warn}`,
+    components: [confirmRow(`svs:manager:shuffle_go:${ladderKey}`, 'svs:manager:shuffle_cancel', 'Yes, shuffle', true)],
+  });
+}
+
+async function handleShuffleGo(interaction, ctx) {
+  await interaction.deferUpdate();
+  const ladderKey = ctx.ladderKey;
+  const ladder = ladderOrNull(ladderKey);
+  if (!ladder) return interaction.editReply({ content: 'Unknown ladder.', components: [] });
+
+  await interaction.editReply({ content: '🎲 Shuffling… this can take a few seconds.', components: [] });
+  try {
+    const r = await shuffleLadder(interaction.client, ladder, { clearCooldowns: false });
+    if (!r.success) {
+      return interaction.editReply({ content: `❌ ${r.reason}` });
+    }
+    const sync = r.discrepancies.length > 0
+      ? '⚠️ Minor sync issues detected (check logs).'
+      : '✅ Sheet and Redis fully synchronized.';
+    return interaction.editReply({
+      content: `🎲 **${ladder.displayName} shuffled.** ${r.playersShuffled} ranks randomized, ${r.challengesCleared} challenge${r.challengesCleared === 1 ? '' : 's'} cleared. ${sync}`,
+    });
+  } catch (error) {
+    logError('Manager panel: shuffle failed', error);
+    return interaction.editReply({ content: 'An error occurred while shuffling. Check the logs and verify data integrity (Sheets version history can restore if needed).' });
+  }
+}
+
+// --- Points Standing (read-only; mirrors /stats title-defends page) ---------
+// ladder select -> this season's title-defense standings (ephemeral, no writes).
+
+async function handlePoints(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  return interaction.editReply({
+    content: '📈 **Points Standing** — which ladder?',
+    components: [ladderSelectRow('points')],
+  });
+}
+
+async function handlePointsFmt(interaction) {
+  await interaction.deferUpdate();
+  const ladderKey = interaction.values[0];
+  const ladder = ladderOrNull(ladderKey);
+  if (!ladder) return interaction.editReply({ content: 'Unknown ladder.', components: [] });
+
+  try {
+    const [defendsResult, season] = await Promise.all([
+      sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${ladder.metricsTab}!A11:D`,
+      }),
+      redisClient.getSeason(ladder).catch(() => null),
+    ]);
+    const seasonLabel = season != null ? `Season ${season}` : 'Current Season';
+
+    const standings = (defendsResult.data.values || [])
+      .filter(row => row[0])
+      .map(row => ({
+        username: row[0],
+        defends: parseInt(row[2] || '0', 10),
+        allTime: parseInt(row[3] || '0', 10),
+      }))
+      .filter(d => d.defends > 0 || d.allTime > 0)
+      .sort((a, b) => b.defends - a.defends || b.allTime - a.allTime);
+
+    const body = standings.length
+      ? standings
+          .map((d, i) => `**${i + 1}.** ${d.username} — ${d.defends} this season (${d.allTime} all-time)`)
+          .join('\n')
+      : 'No title defenses recorded yet this season.';
+
+    const embed = new EmbedBuilder()
+      .setColor(0x00ae86)
+      .setTitle(`👑 ${ladder.displayName} — Points Standing (${seasonLabel})`)
+      .setDescription(body)
+      .setFooter({ text: 'Title defenses this season • all-time in parentheses' })
+      .setTimestamp();
+    return interaction.editReply({ content: '', embeds: [embed], components: [] });
+  } catch (error) {
+    logError('Manager panel: points standing failed', error);
+    return interaction.editReply({ content: 'Could not load the standings. Please try again later.', components: [] });
+  }
+}
+
+// --- Guide (read-only static reference) ------------------------------------
+
+async function handleGuide(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('📖 League Manager Guide')
+    .setDescription('Quick reference for the SvS Manager Panel. Every action is a step-by-step wizard, is ephemeral to you, and re-reads the sheet before writing.')
+    .addFields(
+      {
+        name: 'Roster',
+        value: [
+          '**➕ Add Character** — register a character for a member (owner → ladder → element → build → name/notes).',
+          '**🗑️ Remove Character** — permanently remove a character and re-rank everyone below.',
+        ].join('\n'),
+      },
+      {
+        name: 'Status & Matches',
+        value: [
+          '**🌴 Set Vacation** — flip any character to/from Vacation (forfeits an active challenge first).',
+          '**🏃 Record Dodge** — increment a player\'s dodge count (column K).',
+          '**⛔ Force-Cancel Match** — void an active challenge with no rank change (disputes/mistakes).',
+        ].join('\n'),
+      },
+      {
+        name: 'Ladder-wide',
+        value: [
+          '**🎲 Shuffle Ranks** — randomize all ranks and clear challenges (warns on active matches; cooldowns preserved).',
+          '**🔄 Refresh Boards** — force-reconcile every live dashboard now.',
+        ].join('\n'),
+      },
+      {
+        name: 'Read-only',
+        value: '**📈 Points Standing** — this season\'s title-defense standings. **📖 Guide** — this reference.',
+      }
+    )
+    .setFooter({ text: 'Only members with the SvS Manager role can use the panel.' });
+  return interaction.editReply({ embeds: [embed] });
+}
+
 // --- Router entry ----------------------------------------------------------
 
 async function handle(interaction, ctx) {
@@ -653,6 +880,36 @@ async function handle(interaction, ctx) {
       return handleDodgeFmt(interaction);
     case 'dodge_pick':
       return handleDodgePick(interaction, ctx);
+
+    case 'fcancel':
+      return handleFCancel(interaction);
+    case 'fcancel_fmt':
+      return handleFCancelFmt(interaction);
+    case 'fcancel_pick':
+      return handleFCancelPick(interaction);
+    case 'fcancel_go':
+      return handleFCancelGo(interaction, ctx);
+    case 'fcancel_cancel':
+      await interaction.deferUpdate();
+      return interaction.editReply({ content: 'Cancelled — no changes made.', components: [] });
+
+    case 'shuffle':
+      return handleShuffle(interaction);
+    case 'shuffle_fmt':
+      return handleShuffleFmt(interaction);
+    case 'shuffle_go':
+      return handleShuffleGo(interaction, ctx);
+    case 'shuffle_cancel':
+      await interaction.deferUpdate();
+      return interaction.editReply({ content: 'Cancelled — no changes made.', components: [] });
+
+    case 'points':
+      return handlePoints(interaction);
+    case 'points_fmt':
+      return handlePointsFmt(interaction);
+
+    case 'guide':
+      return handleGuide(interaction);
 
     case 'refreshboards':
       return handleRefreshBoards(interaction);

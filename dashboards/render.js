@@ -286,7 +286,10 @@ function buildManagerPayload() {
         '**🗑️ Remove Character** — permanently remove a character and re-rank the ladder.',
         '**🌴 Set Vacation** — flip any character to/from Vacation (forfeits an active challenge).',
         '**🏃 Record Dodge** — increment a player\'s dodge count.',
-        '**🔄 Refresh Boards** — force-reconcile every live dashboard now.',
+        '**⛔ Force-Cancel Match** — void an active challenge with no rank change.',
+        '**🎲 Shuffle Ranks** — randomize all ranks and clear challenges (cooldowns preserved).',
+        '**📈 Points Standing** — this season\'s title-defense standings (read-only).',
+        '**📖 Guide** — the League Manager reference. **🔄 Refresh Boards** — reconcile every dashboard now.',
         '',
         '_Only members with the **SvS Manager** role can use these._',
       ].join('\n')
@@ -312,9 +315,27 @@ function buildManagerPayload() {
       new ButtonBuilder()
         .setCustomId('svs:manager:dodge')
         .setLabel('🏃 Record Dodge')
-        .setStyle(ButtonStyle.Secondary)
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('svs:manager:fcancel')
+        .setLabel('⛔ Force-Cancel Match')
+        .setStyle(ButtonStyle.Danger)
     ),
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('svs:manager:shuffle')
+        .setLabel('🎲 Shuffle Ranks')
+        .setStyle(ButtonStyle.Danger)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('svs:manager:points')
+        .setLabel('📈 Points Standing')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('svs:manager:guide')
+        .setLabel('📖 Guide')
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('svs:manager:refreshboards')
         .setLabel('🔄 Refresh Boards')
