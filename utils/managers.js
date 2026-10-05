@@ -36,4 +36,37 @@ async function findManagerMembers(guild) {
   return members ? [...members.values()].filter(m => !m.user.bot) : [];
 }
 
-module.exports = { findManagerMembers, findManagerRole, MANAGER_ROLE_NAME };
+// Resolve the channel where the single Approve/Deny post for a manager request
+// (vacation + thread dodge/extend/cancel) should land. We prefer the dashboard
+// registry's `shared/manager` row — that's the admin-panel channel managers
+// actually watch, so the approval post lands where they're looking and the
+// channel auto-follows wherever the manager panel is posted (single source of
+// truth, no extra env var). Falls back to the configured approval channel if the
+// panel hasn't been posted yet or the registry lookup fails. Returns a sendable
+// channel or null; never throws. Deferred requires avoid a config<->registry
+// require cycle at module load.
+async function resolveManagerApprovalChannel(client) {
+  // eslint-disable-next-line global-require
+  const { getDashboardMessage } = require('../dashboards/registry');
+  // eslint-disable-next-line global-require
+  const { DASHBOARD_PANELS, VACATION_APPROVAL_CHANNEL_ID } = require('../config/ladders');
+
+  let channelId = null;
+  try {
+    const record = await getDashboardMessage('shared', DASHBOARD_PANELS.MANAGER);
+    if (record && record.channelId) channelId = record.channelId;
+  } catch (error) {
+    logError('resolveManagerApprovalChannel: registry lookup failed', error);
+  }
+  if (!channelId) channelId = VACATION_APPROVAL_CHANNEL_ID;
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  return channel && typeof channel.send === 'function' ? channel : null;
+}
+
+module.exports = {
+  findManagerMembers,
+  findManagerRole,
+  resolveManagerApprovalChannel,
+  MANAGER_ROLE_NAME,
+};

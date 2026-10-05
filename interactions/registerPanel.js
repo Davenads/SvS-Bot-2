@@ -26,7 +26,7 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const { logError } = require('../logger');
-const { LADDERS, VACATION_APPROVAL_CHANNEL_ID } = require('../config/ladders');
+const { LADDERS } = require('../config/ladders');
 const {
   findUserCharacters,
   findUserVacationCharacters,
@@ -35,7 +35,12 @@ const {
 const { removeCharacterByRank } = require('../services/removalService');
 const { writeNewCharacter, getTakenElements } = require('../services/registrationService');
 const { forfeitActiveChallenge } = require('../services/matchResult');
-const { findManagerMembers, findManagerRole, MANAGER_ROLE_NAME } = require('../utils/managers');
+const {
+  findManagerMembers,
+  findManagerRole,
+  resolveManagerApprovalChannel,
+  MANAGER_ROLE_NAME,
+} = require('../utils/managers');
 const redisClient = require('../redis-client');
 const { refreshDashboard } = require('../dashboards/refresh');
 const { DASHBOARD_PANELS } = require('../config/ladders');
@@ -185,13 +190,11 @@ async function dmRequester(client, discordId, text) {
 // membership, so no manager is missed). Never throws.
 async function postVacationApproval(interaction, char) {
   try {
-    const channel = await interaction.client.channels
-      .fetch(VACATION_APPROVAL_CHANNEL_ID)
-      .catch(() => null);
-    if (!channel || typeof channel.send !== 'function') {
+    const channel = await resolveManagerApprovalChannel(interaction.client);
+    if (!channel) {
       logError(
         'Vacation approval: approval channel unavailable',
-        new Error(`channel ${VACATION_APPROVAL_CHANNEL_ID} unavailable`)
+        new Error('manager approval channel unavailable')
       );
       return false;
     }

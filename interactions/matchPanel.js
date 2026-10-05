@@ -34,12 +34,11 @@ const { logError } = require('../logger');
 const { getGoogleAuth } = require('../fixGoogleAuth');
 const {
   LADDERS,
-  VACATION_APPROVAL_CHANNEL_ID,
   DASHBOARD_PANELS,
 } = require('../config/ladders');
 const { resolveMatch } = require('../services/matchResult');
 const { archiveChallengeThread, persistChallengeThread } = require('../services/challengeThreads');
-const { findManagerRole, MANAGER_ROLE_NAME } = require('../utils/managers');
+const { findManagerRole, resolveManagerApprovalChannel, MANAGER_ROLE_NAME } = require('../utils/managers');
 const redisClient = require('../redis-client');
 const { refreshDashboard } = require('../dashboards/refresh');
 
@@ -237,9 +236,9 @@ async function handleRequest(interaction, ctx, type) {
     return interaction.editReply({ content: 'This challenge is no longer active — nothing to request.' });
   }
 
-  const channel = await interaction.client.channels.fetch(VACATION_APPROVAL_CHANNEL_ID).catch(() => null);
-  if (!channel || typeof channel.send !== 'function') {
-    logError('Match panel: approval channel unavailable', new Error(`channel ${VACATION_APPROVAL_CHANNEL_ID} unavailable`));
+  const channel = await resolveManagerApprovalChannel(interaction.client);
+  if (!channel) {
+    logError('Match panel: approval channel unavailable', new Error('manager approval channel unavailable'));
     return interaction.editReply({ content: '⚠️ Could not reach the SvS Managers right now. Please ping a manager directly.' });
   }
 
