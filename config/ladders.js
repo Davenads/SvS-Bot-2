@@ -88,6 +88,13 @@ const SHARED_CHALLENGE_CHANNEL_ID = '1553197193849081977'; // #issue-a-challenge
 // defaults to the existing command-log channel so the flow works out of the box.
 const VACATION_APPROVAL_CHANNEL_ID = '1165300795277848587';
 
+// Dedicated manager-only channel where every Approve/Deny card (vacation +
+// thread dodge/extend/cancel) lands. Kept SEPARATE from the manager control
+// panel channel: the panel is a static "post once, edit forever" message that
+// only stays visible if nothing else posts beneath it, so the live approval
+// stream gets its own channel instead of burying the panel (#admin-approvals).
+const MANAGER_APPROVAL_CHANNEL_ID = '1556868986069721108';
+
 // Channel hosting the SvS Manager control panel (a shared, static button panel
 // modeled on the #register panel). Set MANAGER_PANEL_CHANNEL_ID in the env to a
 // manager-only channel; when unset the panel simply is not posted (no default,
@@ -124,6 +131,7 @@ module.exports = {
   SHARED_REGISTER_CHANNEL_ID,
   SHARED_CHALLENGE_CHANNEL_ID,
   VACATION_APPROVAL_CHANNEL_ID,
+  MANAGER_APPROVAL_CHANNEL_ID,
   SHARED_MANAGER_CHANNEL_ID,
   DASHBOARDS_TAB,
   DASHBOARD_PANELS,

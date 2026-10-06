@@ -3,8 +3,10 @@
 // Per-challenge coordination threads inside the shared #issue-a-challenge
 // channel (CHANNEL_DASHBOARDS_PLAN.md §5.6). When a challenge is created a
 // PRIVATE thread is spawned as a coordination room for the two duelers; both
-// players and every SvS Manager are added (adding a member pings them). No
-// ready-check — just a pinned detail embed.
+// players and the SvS Thread Mod subscribers are added (the add is the ping).
+// Other managers are NOT added — they browse on demand via the Manage Threads
+// permission (MANAGER_THREAD_NOTIFICATIONS_PLAN.md). No ready-check — just a
+// pinned detail embed.
 //
 // The pair -> threadId mapping lives in a durable Redis sidecar
 // (`challenge-thread:{prefix}:{sortedPair}`) with a TTL longer than the
@@ -20,7 +22,7 @@ const redisClient = require('../redis-client');
 const { logError } = require('../logger');
 const { SHARED_CHALLENGE_CHANNEL_ID } = require('../config/ladders');
 const { specEmojiMap, elementEmojiMap } = require('../config/emoji');
-const { findManagerMembers, findManagerRole } = require('../utils/managers');
+const { findThreadModMembers } = require('../utils/managers');
 
 // Sidecar lives longer than the challenge (~3 days) so teardown can still
 // resolve the thread at/after expiry. 4 days gives a full day of margin.
@@ -105,9 +107,9 @@ function actionButtonsRow(ladder, challengerRow, targetRow) {
   );
 }
 
-// Create a private coordination thread, add both duelers + all SvS Managers,
-// post a pinned detail embed, and persist the pair -> threadId sidecar. Returns
-// the thread id on success or null (never throws).
+// Create a private coordination thread, add both duelers + the SvS Thread Mod
+// subscribers, post a pinned detail embed, and persist the pair -> threadId
+// sidecar. Returns the thread id on success or null (never throws).
 async function createChallengeThread(
   client,
   ladder,
@@ -133,17 +135,19 @@ async function createChallengeThread(
       reason: `Challenge thread: ${ladder.displayName}`,
     });
 
-    // Add both duelers + every SvS Manager. Private threads require EXPLICIT
-    // membership, so each is added directly (adding a member pings them, answer
-    // 1). The manager roster is freshly fetched inside findManagerMembers, so no
-    // manager is missed — the old cache-only lookup dropped uncached managers.
-    const managerRole = findManagerRole(channel.guild);
+    // Add both duelers + the SvS Thread Mod subscribers. Private threads require
+    // EXPLICIT membership, and the add is itself the single creation ping
+    // (answer 4). The full SvS Manager role is NOT added — managers browse on
+    // demand via the Manage Threads permission, so non-thread-mods get zero
+    // pings. The thread-mod roster is force-fetched inside findThreadModMembers
+    // so nobody is dropped. Fallback: if the role is absent or empty, only the
+    // two duelers are added.
     const memberIds = new Set([challengerRow[8], targetRow[8]]);
     try {
-      const managers = await findManagerMembers(channel.guild);
-      managers.forEach(m => memberIds.add(m.id));
+      const threadMods = await findThreadModMembers(channel.guild);
+      threadMods.forEach(m => memberIds.add(m.id));
     } catch (error) {
-      logError('Challenge threads: manager lookup failed', error);
+      logError('Challenge threads: thread-mod lookup failed', error);
     }
     for (const id of memberIds) {
       if (!id) continue;
@@ -152,23 +156,17 @@ async function createChallengeThread(
       );
     }
 
-    // Pinned challenge-detail embed (no buttons — coordination only, answer 2).
-    // The message also tags the SvS Manager ROLE for one clean, visible ping
-    // (reaching any manager the explicit add missed) plus both duelers.
+    // Pinned challenge-detail embed. Mentions ONLY the two duelers so their own
+    // match clearly surfaces for them; the thread mods already got their single
+    // ping from the add above, so there is no role mention (answer 4).
     try {
       const duelerIds = [challengerRow[8], targetRow[8]].filter(Boolean);
-      const mentionLine = [
-        managerRole ? `<@&${managerRole.id}>` : '',
-        duelerIds.map(id => `<@${id}>`).join(' '),
-      ]
-        .filter(Boolean)
-        .join(' ');
+      const mentionLine = duelerIds.map(id => `<@${id}>`).join(' ');
       const msg = await thread.send({
         content: mentionLine || undefined,
         embeds: [detailEmbed(ladder, challengerRow, targetRow, challengerRank, targetRank, challengeDate)],
         components: [actionButtonsRow(ladder, challengerRow, targetRow)],
         allowedMentions: {
-          roles: managerRole ? [managerRole.id] : [],
           users: duelerIds,
         },
       });
